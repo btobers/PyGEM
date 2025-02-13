@@ -28,7 +28,6 @@ class PyGEMMassBalance(MassBalanceModel):
                  debug=pygem_prms['debug']['mb'], debug_refreeze=pygem_prms['debug']['refreeze'],
                  fls=None, fl_id=0,
                  heights=None, repeat_period=False,
-                 inversion_filter=False,
                  ignore_debris=False
                        ):
         """ Initialize.
@@ -53,7 +52,6 @@ class PyGEMMassBalance(MassBalanceModel):
         if debug:
             print('\n\nDEBUGGING MASS BALANCE FUNCTION\n\n')
         self.debug_refreeze = debug_refreeze
-        self.inversion_filter = inversion_filter
 
         super(PyGEMMassBalance, self).__init__()
         self.valid_bounds = [-1e4, 2e4]  # in m
@@ -621,9 +619,6 @@ class PyGEMMassBalance(MassBalanceModel):
         seconds_in_year = self.dayspermonth[12*year:12*(year+1)].sum() * 24 * 3600
         mb = (self.glac_bin_massbalclim[:,12*year:12*(year+1)].sum(1)
               * pygem_prms['constants']['density_water'] / pygem_prms['constants']['density_ice'] / seconds_in_year)
-        
-        if self.inversion_filter:
-            mb = np.minimum.accumulate(mb)
 
         # Fill in non-glaciated areas - needed for OGGM dynamics to remove small ice flux into next bin
         mb_filled = mb.copy()

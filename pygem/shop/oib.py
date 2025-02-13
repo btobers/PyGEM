@@ -257,7 +257,7 @@ class oib:
             self.dbl_diffs['dmda_err'] = self.dbl_diffs['sigma'] * conversion_factor[:,np.newaxis]
         else:
             self.dbl_diffs['dmda'] = None
-            self._dbl_diff['dmda_err'] = None
+            self.dbl_diffs['dmda_err'] = None
 
 
 def _filter_on_pixel_count(arr, pctl = 15):

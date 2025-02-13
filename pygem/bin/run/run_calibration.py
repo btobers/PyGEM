@@ -181,8 +181,7 @@ def get_dmda(gdir, modelprms, glacier_rgi_table, fls=None, glen_a_multiplier=Non
     # perform OGGM ice thickness inversion
     # Perform inversion based on PyGEM MB using reference directory
     mbmod_inv = PyGEMMassBalance(gdir, modelprms, glacier_rgi_table,
-                                    fls=fls, option_areaconstant=True,
-                                    inversion_filter=pygem_prms['mb']['include_debris'])
+                                    fls=fls, option_areaconstant=True)
     if not gdir.is_tidewater or not pygem_prms['setup']['include_frontalablation']:
         # Arbitrariliy shift the MB profile up (or down) until mass balance is zero (equilibrium for inversion)
         apparent_mb_from_any_mb(gdir, mb_years=np.arange(nyears), mb_model=mbmod_inv)
@@ -702,20 +701,27 @@ def run(list_packed_vars):
                     # double difference to remove the COP30 signal from the relative OIB surface elevation changes
                     icebridge._dbl_diff()
                     # convert to mass changes
-                    icebridge._elevchange_to_masschange(ela=tasks.compute_ela(gdir, ys=args.ref_startyear, ye=args.ref_endyear).mean())
+                    yrs = list(range(args.ref_startyear, args.ref_endyear + 1))
+                    ela = tasks.compute_ela(gdir, years=yrs)
+                    icebridge._elevchange_to_masschange(ela=ela.mean())
                     # return icebridge.dbl_diffs and attach to gdir
-                    gdir.deltah = icebridge._get_dbldiffs()
+                    gdir.dmda = icebridge._get_dbldiffs()
                     # ensure data to calibrate against
-                    if gdir.deltah['dmda'] is None:
+                    if gdir.dmda['dmda'] is None:
                         raise ValueError("No valid OIB data to calibrate against.")
                     # store bin_edges and bin_area
-                    gdir.deltah['bin_edges'] = icebridge._get_edges()
-                    gdir.deltah['bin_centers'] = icebridge._get_centers()
-                    gdir.deltah['bin_area'] = icebridge._get_area()
+                    gdir.dmda['bin_edges'] = icebridge._get_edges()
+                    gdir.dmda['bin_centers'] = icebridge._get_centers()
+                    gdir.dmda['bin_area'] = icebridge._get_area()
+                    # store ela info
+                    gdir.dmda['ela'] = {
+                                        'yr': yrs,
+                                        'z': ela.values.tolist()
+                                        }
                     # create a dictionary that maps datetime values in gdir.dates_table to their indices
                     index_map = {value: idx for idx, value in enumerate(gdir.dates_table.date.tolist())}
-                    # map each element in the gdir.deltah['dates'] to its index in gdir.dates_table - these inds will be used to difference model results in MCMC calib
-                    gdir.deltah['model_inds_map'] = [(index_map[val1], index_map[val2]) for val1, val2 in gdir.deltah['dates']]
+                    # map each element in the gdir.dmda['dates'] to its index in gdir.dates_table - these inds will be used to difference model results in MCMC calib
+                    gdir.dmda['model_inds_map'] = [(index_map[val1], index_map[val2]) for val1, val2 in gdir.dmda['dates']]
 
                     # get glen_a, as dynamics will need to be on to get thickness changes
                     if pygem_prms['sim']['oggm_dynamics']['use_reg_glena']:
@@ -1436,12 +1442,12 @@ def run(list_packed_vars):
                                 fls, 
                                 glen_a_multiplier, 
                                 fs, 
-                                gdir.deltah['model_inds_map'], 
-                                gdir.deltah['bin_edges'],
-                                gdir.deltah['bin_centers'])
+                                gdir.dmda['model_inds_map'], 
+                                gdir.dmda['bin_edges'],
+                                gdir.dmda['bin_centers'])
                     # append deltah obs and undto obs list
-                    # obs.append((torch.tensor(gdir.deltah['dmda']),torch.tensor([10])))
-                    obs.append((torch.tensor(gdir.deltah['dmda']),torch.tensor(gdir.deltah['dmda_err'])))
+                    # obs.append((torch.tensor(gdir.dmda['dmda']),torch.tensor([10])))
+                    obs.append((torch.tensor(gdir.dmda['dmda']),torch.tensor(gdir.dmda['dmda_err'])))
                 # if there are more observations to calibrate against, simply append a tuple of (obs, variance) to obs list
                 # e.g. obs.append((torch.tensor(dmda_array),torch.tensor(dmda_err_array)))
                 elif pygem_prms['calib']['MCMC_params']['option_use_emulator']:
@@ -1551,11 +1557,11 @@ def run(list_packed_vars):
                     modelprms_export['mb_obs_mwea_err'] = [float(mb_obs_mwea_err)]
                     modelprms_export['priors'] = priors
                     if args.oib:
-                        modelprms_export['dmda']['x'] = ((gdir.deltah['bin_edges'][:-1] + gdir.deltah['bin_edges'][1:]) / 2).tolist()
-                        modelprms_export['dmda']['area'] = gdir.deltah['bin_area'].tolist()
+                        modelprms_export['dmda']['x'] = gdir.dmda['bin_centers'].tolist()
+                        modelprms_export['dmda']['area'] = gdir.dmda['bin_area'].tolist()
                         modelprms_export['dmda']['obs'] = [ob.flatten().tolist() for ob in obs[1]]
-                        modelprms_export['dmda']['dates'] = [(dt1.strftime("%Y-%m-%d"), dt2.strftime("%Y-%m-%d")) for dt1, dt2 in gdir.deltah['dates']]
-
+                        modelprms_export['dmda']['dates'] = [(dt1.strftime("%Y-%m-%d"), dt2.strftime("%Y-%m-%d")) for dt1, dt2 in gdir.dmda['dates']]
+                        modelprms_export['dmda']['ela'] = gdir.dmda['ela']
                     modelprms_fn = glacier_str + '-modelprms_dict.json'
                     modelprms_fp = [(pygem_prms['root'] + f'/Output/calibration/' + glacier_str.split('.')[0].zfill(2) 
                                     + '/')]

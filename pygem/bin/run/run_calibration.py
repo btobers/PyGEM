@@ -701,27 +701,28 @@ def run(list_packed_vars):
                     # double difference to remove the COP30 signal from the relative OIB surface elevation changes
                     icebridge._dbl_diff()
                     # convert to mass changes
+                    l3_proc(gdir)
                     yrs = list(range(args.ref_startyear, args.ref_endyear + 1))
                     ela = tasks.compute_ela(gdir, years=yrs)
                     icebridge._elevchange_to_masschange(ela=ela.mean())
                     # return icebridge.dbl_diffs and attach to gdir
-                    gdir.dmda = icebridge._get_dbldiffs()
+                    gdir.oib_diffs = icebridge._get_dbldiffs()
                     # ensure data to calibrate against
-                    if gdir.dmda['dmda'] is None:
+                    if gdir.oib_diffs['dmda'] is None:
                         raise ValueError("No valid OIB data to calibrate against.")
                     # store bin_edges and bin_area
-                    gdir.dmda['bin_edges'] = icebridge._get_edges()
-                    gdir.dmda['bin_centers'] = icebridge._get_centers()
-                    gdir.dmda['bin_area'] = icebridge._get_area()
+                    gdir.oib_diffs['bin_edges'] = icebridge._get_edges()
+                    gdir.oib_diffs['bin_centers'] = icebridge._get_centers()
+                    gdir.oib_diffs['bin_area'] = icebridge._get_area()
                     # store ela info
-                    gdir.dmda['ela'] = {
+                    gdir.oib_diffs['ela'] = {
                                         'yr': yrs,
                                         'z': ela.values.tolist()
                                         }
                     # create a dictionary that maps datetime values in gdir.dates_table to their indices
                     index_map = {value: idx for idx, value in enumerate(gdir.dates_table.date.tolist())}
-                    # map each element in the gdir.dmda['dates'] to its index in gdir.dates_table - these inds will be used to difference model results in MCMC calib
-                    gdir.dmda['model_inds_map'] = [(index_map[val1], index_map[val2]) for val1, val2 in gdir.dmda['dates']]
+                    # map each element in the gdir.oib_diffs['dates'] to its index in gdir.dates_table - these inds will be used to difference model results in MCMC calib
+                    gdir.oib_diffs['model_inds_map'] = [(index_map[val1], index_map[val2]) for val1, val2 in gdir.oib_diffs['dates']]
 
                     # get glen_a, as dynamics will need to be on to get thickness changes
                     if pygem_prms['sim']['oggm_dynamics']['use_reg_glena']:
@@ -1442,12 +1443,12 @@ def run(list_packed_vars):
                                 fls, 
                                 glen_a_multiplier, 
                                 fs, 
-                                gdir.dmda['model_inds_map'], 
-                                gdir.dmda['bin_edges'],
-                                gdir.dmda['bin_centers'])
+                                gdir.oib_diffs['model_inds_map'], 
+                                gdir.oib_diffs['bin_edges'],
+                                gdir.oib_diffs['bin_centers'])
                     # append deltah obs and undto obs list
-                    # obs.append((torch.tensor(gdir.dmda['dmda']),torch.tensor([10])))
-                    obs.append((torch.tensor(gdir.dmda['dmda']),torch.tensor(gdir.dmda['dmda_err'])))
+                    # obs.append((torch.tensor(gdir.oib_diffs['dmda']),torch.tensor([10])))
+                    obs.append((torch.tensor(gdir.oib_diffs['dmda']),torch.tensor(gdir.oib_diffs['dmda_err'])))
                 # if there are more observations to calibrate against, simply append a tuple of (obs, variance) to obs list
                 # e.g. obs.append((torch.tensor(dmda_array),torch.tensor(dmda_err_array)))
                 elif pygem_prms['calib']['MCMC_params']['option_use_emulator']:
@@ -1557,11 +1558,11 @@ def run(list_packed_vars):
                     modelprms_export['mb_obs_mwea_err'] = [float(mb_obs_mwea_err)]
                     modelprms_export['priors'] = priors
                     if args.oib:
-                        modelprms_export['dmda']['x'] = gdir.dmda['bin_centers'].tolist()
-                        modelprms_export['dmda']['area'] = gdir.dmda['bin_area'].tolist()
+                        modelprms_export['dmda']['x'] = gdir.oib_diffs['bin_centers'].tolist()
+                        modelprms_export['dmda']['area'] = gdir.oib_diffs['bin_area'].tolist()
                         modelprms_export['dmda']['obs'] = [ob.flatten().tolist() for ob in obs[1]]
-                        modelprms_export['dmda']['dates'] = [(dt1.strftime("%Y-%m-%d"), dt2.strftime("%Y-%m-%d")) for dt1, dt2 in gdir.dmda['dates']]
-                        modelprms_export['dmda']['ela'] = gdir.dmda['ela']
+                        modelprms_export['dmda']['dates'] = [(dt1.strftime("%Y-%m-%d"), dt2.strftime("%Y-%m-%d")) for dt1, dt2 in gdir.oib_diffs['dates']]
+                        modelprms_export['dmda']['ela'] = gdir.oib_diffs['ela']
                     modelprms_fn = glacier_str + '-modelprms_dict.json'
                     modelprms_fp = [(pygem_prms['root'] + f'/Output/calibration/' + glacier_str.split('.')[0].zfill(2) 
                                     + '/')]

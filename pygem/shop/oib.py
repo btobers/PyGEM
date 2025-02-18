@@ -8,6 +8,7 @@ Distrubted under the MIT lisence
 NASA Operation IceBridge data and processing class
 """
 import re, os, glob, json, pickle, datetime, warnings, sys
+from datetime import timedelta
 import numpy as np
 import pandas as pd
 from scipy import signal, stats
@@ -35,6 +36,8 @@ class oib:
     
     def _get_diffs(self):
         return self.oib_diffs
+    def _set_diffs(self, diffs_dict):
+        self.oib_diffs = diffs_dict
     def _get_dbldiffs(self):
         return self.dbl_diffs
     def _get_centers(self):
@@ -86,6 +89,7 @@ class oib:
         """
         if survey date in given month <daysinmonth/2 assign it to beginning of month, else assign to beginning of next month (for consistency with monthly PyGEM timesteps)
         """
+        return dt_obj
         dim = pd.Series(dt_obj).dt.daysinmonth.iloc[0]
         if dt_obj.day < dim // 2:
             dt_obj_ = datetime.datetime(year=dt_obj.year, month=dt_obj.month, day=1)
@@ -130,7 +134,7 @@ class oib:
                 sigmas = np.asarray(self.oib_dict[ssn][yr]['bin_vals']['bin_interquartile_range_diffs_vec'])
                 sigmas[mask] = np.nan
                 # add masked diffs to master dictionary
-                self.oib_diffs[self._date_check(dt_obj)] = (diffs,sigmas)
+                self.oib_diffs[dt_obj] = (diffs,sigmas)
         # Sort the dictionary by date keys
         self.oib_diffs = dict(sorted(self.oib_diffs.items()))
 
@@ -209,7 +213,7 @@ class oib:
 
 
     # double difference all oib diffs from the same season 1+ year apart
-    def _dbl_diff(self, months=range(1,13)):
+    def _dbl_diff(self, tolerance=30):
         # prepopulate dbl_diffs dictionary object will structure with dates, dh, sigma
         # where dates is a tuple for each double differenced array in the format of (date1,date2),
         # where date1's cop30 differences were subtracted from date2's to get the dh values for that time span,
@@ -217,22 +221,24 @@ class oib:
         self.dbl_diffs['dates'] = []
         self.dbl_diffs['dh'] = []
         self.dbl_diffs['sigma'] = []
-        # loop through months
-        for m in months:
-            # filter and sort dates to include only those in the target month
-            filtered_dates = sorted([x for x in list(self.oib_diffs.keys()) if x.month == m])
-            # Calculate differences for consecutive pairs that are >=1 full year apart
-            for i in range(len(filtered_dates) - 1):
-                date1 = filtered_dates[i]
-                date2 = filtered_dates[i + 1]
-                year_diff = date2.year - date1.year
 
-                # Check if the pair is at least one full year apart
-                if year_diff >= 1:
+        # convert keys to a sorted list
+        sorted_dates = sorted(self.oib_diffs.keys())
+        # define acceptable tolerance for matching months
+        tol = timedelta(days=tolerance)
+        # iterate through sorted dates
+        for i, date1 in enumerate(sorted_dates[:-1]):
+            for j in range(i + 1, len(sorted_dates)):
+                date2 = sorted_dates[j]
+                delta = int((date2 - date1).days)
+                # Check if the difference is close to an integer multiple of a year
+                if abs(delta - round(delta / 365) * 365) <= tol.days:
                     self.dbl_diffs['dates'].append((date1,date2))
                     self.dbl_diffs['dh'].append(self.oib_diffs[date2][0] - self.oib_diffs[date1][0])
                     # self.dbl_diffs['sigma'].append((self.oib_diffs[date2][1] + self.oib_diffs[date1][1]) / 2)
                     self.dbl_diffs['sigma'].append(self.oib_diffs[date2][1] + self.oib_diffs[date1][1])
+                    break  # Stop looking for further matches for date1
+
         # column stack dh and sigmas into single 2d array
         if len(self.dbl_diffs['dh'])>0:
             self.dbl_diffs['dh'] = np.column_stack(self.dbl_diffs['dh'])

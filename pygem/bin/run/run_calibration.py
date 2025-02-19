@@ -686,8 +686,10 @@ def run(list_packed_vars):
                 icebridge._rgi6torgi7id(debug=debug)
                 if icebridge.rgi7id:
                     icebridge._load()
-                    icebridge._parsediffs(filter_count_pctl=pygem_prms['calib']['data']['oib']['oib_filter_pctl'])
-                    icebridge._terminus_mask()
+                    icebridge._parsediffs()
+                    icebridge._filter_on_pixel_count(pctl=pygem_prms['calib']['data']['oib']['oib_filter_pctl'], inplace=True)
+                    icebridge._terminus_mask(inplace=True)
+                    icebridge._remove_outliers_zscore(zscore=3, inplace=True)
                     icebridge._rebin(agg=pygem_prms['calib']['data']['oib']['oib_rebin'])
                     # only retain diffs for survey dates within model timespan
                     _, oib_inds, pygem_inds = np.intersect1d(list(icebridge.oib_diffs.keys()), gdir.dates_table.date.to_numpy(), return_indices=True)

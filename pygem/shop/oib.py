@@ -282,10 +282,10 @@ class oib:
                 # check if the difference is approximately an integer multiple of years ± n month
                 if rem <= tolerance_months or rem >= 12 - tolerance_months:
                     self.dbl_diffs['dates'].append((date1,date2))
-                    self.dbl_diffs['dh'].append((self.oib_diffs[date2][0] - self.oib_diffs[date1][0]) / round(delta_mon / 12))
+                    self.dbl_diffs['dh'].append(self.oib_diffs[date2][0] - self.oib_diffs[date1][0])
                     # self.dbl_diffs['sigma'].append((self.oib_diffs[date2][1] + self.oib_diffs[date1][1]) / 2)
                     self.dbl_diffs['sigma'].append(self.oib_diffs[date2][1] + self.oib_diffs[date1][1])
-                    break  # Stop looking for further matches for date1
+                    # break  # Stop looking for further matches for date1
 
         # column stack dh and sigmas into single 2d array
         if len(self.dbl_diffs['dh'])>0:

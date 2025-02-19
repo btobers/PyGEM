@@ -27,7 +27,7 @@ class oib:
         self.rgi6id = rgi6id
         self.rgi7id = rgi7id
         self.name = None
-        # instatntiate dictionary to hold all data - store the data by survey date, with each key containing a tuple with the binned differences and uncertainties (diffs, sigma)
+        # instatntiate dictionary to hold all data - store the data by survey date, with each key containing a list with the binned differences and uncertainties (diffs, sigma)
         self.oib_diffs = {}
         self.dbl_diffs = {}
         self.bin_edges = None
@@ -37,13 +37,19 @@ class oib:
     def _get_diffs(self):
         return self.oib_diffs
     def _set_diffs(self, diffs_dict):
-        self.oib_diffs = diffs_dict
+        self.oib_diffs = dict(sorted(diffs_dict.items()))
     def _get_dbldiffs(self):
         return self.dbl_diffs
+    def _set_centers(self, centers):
+        self.bin_centers = centers
     def _get_centers(self):
         return self.bin_centers
+    def _set_edges(self, edges):
+        self.bin_edges = edges
     def _get_edges(self):
         return self.bin_edges
+    def _set_area(self, area):
+        self.bin_area = area
     def _get_area(self):
         return self.bin_area
     def _get_name(self):
@@ -100,13 +106,13 @@ class oib:
             self.name = split_by_uppercase(self.oib_dict['glacier_shortname'])
 
 
-    def _parsediffs(self, filter_count_pctl=10, debug=False):
+    def _parsediffs(self, debug=False):
         """
-        loop through OIB dataset, get differences
-        diffs_stacked: np.ndarray (#bins, #surveys)
+        parse COP30-relative elevation differences
         """
         # get seasons stored in oib diffs
         seasons = list(set(self.oib_dict.keys()).intersection(['march','may','august']))
+        diffs_dict = {}
         for ssn in seasons:
             for yr in list(self.oib_dict[ssn].keys()):
                 # get survey date
@@ -115,88 +121,142 @@ class oib:
                 # get survey data and filter by pixel count
                 diffs = np.asarray(self.oib_dict[ssn][yr]['bin_vals']['bin_median_diffs_vec'])
                 counts = np.asarray(self.oib_dict[ssn][yr]['bin_vals']['bin_count_vec'])
-                mask = _filter_on_pixel_count(counts, filter_count_pctl)
-                diffs[mask] = np.nan
                 # uncertainty represented by IQR
                 sigmas = np.asarray(self.oib_dict[ssn][yr]['bin_vals']['bin_interquartile_range_diffs_vec'])
-                sigmas[mask] = np.nan
-                # add masked diffs to master dictionary
-                self.oib_diffs[round_to_nearest_month(dt_obj)] = (diffs,sigmas)
+                # add [diffs, sigma, counts] to master dictionary
+                diffs_dict[round_to_nearest_month(dt_obj)] = [diffs,sigmas,counts]
         # Sort the dictionary by date keys
-        self.oib_diffs = dict(sorted(self.oib_diffs.items()))
+        self._set_diffs(diffs_dict)
 
         if debug:
             print(f'OIB survey dates:\n{", ".join([str(dt.year)+"-"+str(dt.month)+"-"+str(dt.day) for dt in list(self.oib_diffs.keys())])}')
         # get bin centers
-        self.bin_centers = (np.asarray(self.oib_dict[ssn][list(self.oib_dict[ssn].keys())[0]]['bin_vals']['bin_start_vec']) + 
-                    np.asarray(self.oib_dict[ssn][list(self.oib_dict[ssn].keys())[0]]['bin_vals']['bin_stop_vec'])) / 2
-        self.bin_area = self.oib_dict['aad_dict']['hist_bin_areas_m2']
-        # bin_edges = oib_dict[ssn][list(oib_dict[ssn].keys())[0]]['bin_vals']['bin_start_vec']
-        # bin_edges.append(oib_dict[ssn][list(oib_dict[ssn].keys())[0]]['bin_vals']['bin_stop_vec'][-1])
-        # bin_edges = np.asarray(bin_edges)
+        self._set_centers((np.asarray(self.oib_dict[ssn][list(self.oib_dict[ssn].keys())[0]]['bin_vals']['bin_start_vec']) + 
+                    np.asarray(self.oib_dict[ssn][list(self.oib_dict[ssn].keys())[0]]['bin_vals']['bin_stop_vec'])) / 2)
+        self._set_area(self.oib_dict['aad_dict']['hist_bin_areas_m2'])
+        edges = list(self.oib_dict[ssn][list(self.oib_dict[ssn].keys())[0]]['bin_vals']['bin_start_vec'])
+        edges.append(self.oib_dict[ssn][list(self.oib_dict[ssn].keys())[0]]['bin_vals']['bin_stop_vec'][-1])
+        self._set_edges(np.asarray(edges))
 
 
-    def _terminus_mask(self, debug=False):
+    def _terminus_mask(self, debug=False, inplace=False):
         """
-        create mask of missing terminus ice using last oib survey
+        create mask of missing terminus ice using the last OIB survey.
+
+        parameters:
+        - debug: bool, whether to plot debug information.
+        - inplace: bool, whether to modify in place.
         """
-        survey_dates = list(self.oib_diffs.keys())
-        inds = range(len(survey_dates))[::-1]
-        diffs = [tup[0] for tup in self.oib_diffs.values()]
-        # only look above bins with area>0
-        lowest_bin = np.where(np.asarray(self.bin_area) != 0)[0][0]
+        diffs = self._get_diffs()
+        x = self._get_centers()
+        oib_diffs_masked = {}
+        survey_dates = list(diffs.keys())
+        inds = list(range(len(survey_dates)))[::-1]  # reverse index list
+        diffs_arr = [v[0] for v in diffs.values()]  # extract first array from lists
+        # find the lowest bin where area is nonzero
+        lowest_bin = np.nonzero(self._get_area())[0][0]
+        x = x[lowest_bin:lowest_bin+50]
         idx = None
         mask = []
+
         try:
             for i in inds:
-                tmp = diffs[i][lowest_bin:lowest_bin+50]
+                tmp = diffs_arr[i][lowest_bin:lowest_bin+50]
+
                 if np.isnan(tmp).all():
-                    continue
+                    continue  # skip if all NaN
                 else:
-                    # find peak we'll bake in the assumption that terminus thickness has decreased over time - we'll thus look for a trough if yr>=2013 (cop30 date)
-                    if survey_dates[i].year>2013:
-                        idx = np.nanargmin(tmp) + lowest_bin
+                    # interpolate over ant nans and then find peak/trouch
+                    goodmask = ~np.isnan(tmp)
+                    tmp = np.interp(x, x[goodmask], tmp[goodmask])
+                    # identify peak/trough based on survey year
+                    if survey_dates[i].year > 2013:
+                        idx = np.nanargmin(tmp) + lowest_bin  # look for a trough
                     else:
-                        tmp = -1*tmp
-                        idx = np.nanargmax(tmp) + lowest_bin
-                    mask = np.arange(0,idx+1,1)
-                    break
+                        idx = np.nanargmax(-tmp) + lowest_bin  # look for a peak
+                    mask = np.arange(0, idx + 1, 1)  # create mask range
+                    break  # stop once the first valid index is found
             if debug:
                 plt.figure()
-                cmap=plt.cm.rainbow(np.linspace(0, 1, len(inds)))
+                cmap = plt.cm.rainbow(np.linspace(0, 1, len(inds)))
                 for i in inds[::-1]:
-                    plt.plot(diffs[i],label=f'{survey_dates[i].year}:{survey_dates[i].month}:{survey_dates[i].day}',c=cmap[i])
-                if idx:
-                    plt.axvline(idx,c='k',ls=':')
+                    plt.plot(diffs_arr[i], label=f'{survey_dates[i].year}:{survey_dates[i].month}:{survey_dates[i].day}', c=cmap[i])
+                if idx is not None:
+                    plt.axvline(idx, c='k', ls=':')
                 plt.legend(loc='upper right')
                 plt.show()
 
         except Exception as err:
             if debug:
-                print(f'_filter_terminus_missing_ice error: {err}')
+                print(f'_terminus_mask error: {err}')
             mask = []
 
-        # apply mask
-        for tup in self.oib_diffs.values():
-            tup[0][mask] = np.nan
-            tup[1][mask] = np.nan
+        # apply mask while preserving list structure
+        for k, v in diffs.items():
+            v_list = [arr.copy().astype(float) if isinstance(arr, np.ndarray) else arr for arr in v]
+            for i in range(len(v_list)):
+                if isinstance(v_list[i], np.ndarray):  
+                    v_list[i][mask] = np.nan  # apply mask
+
+            oib_diffs_masked[k] = v_list  # store modified list
+
+        if inplace:
+            self._set_diffs(oib_diffs_masked)
+        else:
+            return dict(sorted(oib_diffs_masked.items()))
 
 
-    def _rebin(self, agg=100):
-        if agg:
-            # aggregate both model and obs to specified size m bins
-            nbins = int(np.ceil((self.bin_centers[-1] - self.bin_centers[0]) // agg))
-            with warnings.catch_warnings():
-                warnings.filterwarnings('ignore')
-                for i,(k, tup) in enumerate(self.oib_diffs.items()):
-                    if i==0:
-                        y, self.bin_edges, _ = stats.binned_statistic(x=self.bin_centers, values=tup[0], statistic=np.nanmean, bins=nbins)
-                    else:
-                        y = stats.binned_statistic(x=self.bin_centers, values=tup[0], statistic=np.nanmean, bins=self.bin_edges)[0]
-                    s = stats.binned_statistic(x=self.bin_centers, values=tup[1], statistic=np.nanmean, bins=self.bin_edges)[0]
-                    self.oib_diffs[k] = (y,s)
-                self.bin_area  = stats.binned_statistic(x=self.bin_centers, values=self.bin_area, statistic=np.nanmean, bins=self.bin_edges)[0]
-            self.bin_centers = ((self.bin_edges[:-1] + self.bin_edges[1:]) / 2)
+    def _rebin(self, agg=100, inplace=False):
+        """
+        rebin to specified bin sizes.
+
+        parameters:
+        - agg: int, bin size
+        - inplace: bool, whether to modify in place
+        """
+        oib_diffs_rebin = {}
+        
+        # aggregate both model and obs to specified bin sizes
+        centers = self._get_centers()
+        
+        # get number of bins
+        nbins = int(np.ceil((centers[-1] - centers[0]) / agg))
+        
+        # suppress warnings for NaN-related operations
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
+
+            for i, (k, v) in enumerate(self._get_diffs().items()):
+                # Eensure v is a list of three NumPy arrays
+                if not (isinstance(v, list) and len(v) == 3 and all(isinstance(arr, np.ndarray) for arr in v)):
+                    raise ValueError(f"Expected list of 3 NumPy arrays for key '{k}', but got {v} of type {type(v)}")
+
+                # perform binning
+                if i == 0:
+                    y, edges, _ = stats.binned_statistic(x=centers, values=v[0], statistic=np.nanmedian, bins=nbins)
+                else:
+                    y = stats.binned_statistic(x=centers, values=v[0], statistic=np.nanmedian, bins=edges)[0]
+
+                s = stats.binned_statistic(x=centers, values=v[1], statistic=np.nanmedian, bins=edges)[0]
+                c = stats.binned_statistic(x=centers, values=v[2], statistic=np.nanmedian, bins=edges)[0]
+                
+                # store results
+                oib_diffs_rebin[k] = [y, s, c]
+
+            # compute binned area
+            area = stats.binned_statistic(x=centers, values=self._get_area(), statistic=np.nanmedian, bins=edges)[0]
+
+        # compute new bin centers
+        centers = (edges[:-1] + edges[1:]) / 2
+
+        # apply changes in-place or return results
+        if inplace:
+            self._set_diffs(oib_diffs_rebin)
+            self._set_edges(edges)
+            self._set_centers(centers)
+            self._set_area(area)
+        else:
+            return oib_diffs_rebin, edges, centers, area
 
 
     # double difference all oib diffs from the same season 1+ year apart
@@ -222,7 +282,7 @@ class oib:
                 # check if the difference is approximately an integer multiple of years ± n month
                 if rem <= tolerance_months or rem >= 12 - tolerance_months:
                     self.dbl_diffs['dates'].append((date1,date2))
-                    self.dbl_diffs['dh'].append(self.oib_diffs[date2][0] - self.oib_diffs[date1][0])
+                    self.dbl_diffs['dh'].append((self.oib_diffs[date2][0] - self.oib_diffs[date1][0]) / round(delta_mon / 12))
                     # self.dbl_diffs['sigma'].append((self.oib_diffs[date2][1] + self.oib_diffs[date1][1]) / 2)
                     self.dbl_diffs['sigma'].append(self.oib_diffs[date2][1] + self.oib_diffs[date1][1])
                     break  # Stop looking for further matches for date1
@@ -254,14 +314,73 @@ class oib:
             self.dbl_diffs['dmda_err'] = None
 
 
-def _filter_on_pixel_count(arr, pctl = 15):
-    """
-    filter oib diffs by perntile pixel count
-    """
-    arr=arr.astype(float)
-    arr[arr==0] = np.nan
-    mask = arr < np.nanpercentile(arr,pctl)
-    return mask
+    def _filter_on_pixel_count(self, pctl=15, inplace=False):
+        """
+        filter oib diffs by perntile pixel count
+
+        parameters:
+        - pctl: int, percentile
+        - inplace: bool, whether to modify in place
+        """
+        oib_diffs_filt = {}
+        for k, v in self._get_diffs().items():
+            arr=v[2].astype(float)      # convert 2nd tuple element (count) to float
+            arr[arr==0] = np.nan        # replace any 0 counts to nan
+            mask = arr < np.nanpercentile(arr,pctl)
+            v_list = list(v)
+            # Apply mask only to numpy arrays
+            for i in range(len(v_list)):
+                if isinstance(v_list[i], np.ndarray):  
+                    v_list[i] = v_list[i].copy().astype(float)  # ensure modification doesn't affect original
+                    v_list[i][mask] = np.nan  # apply mask
+            
+            # set key with updated list of arrays
+            oib_diffs_filt[k] = v_list
+
+        if inplace:
+            self._set_diffs(oib_diffs_filt)
+        else:
+            return oib_diffs_filt
+        
+
+    def _remove_outliers_zscore(self, zscore=3, inplace=False):
+        """
+        z-score filter based on sigma-obs
+
+        parameters:
+        - zscore: int, z-score
+        - inplace: bool, whether to modify in place
+        """
+        oib_diffs_filt = {}
+
+        for k, v in self._get_diffs().items():
+            arr = v[1].astype(float)  # convert sigma-obs to float
+            if not np.isnan(arr).all():
+                mean = np.nanmean(arr)
+                std = np.nanstd(arr)
+            else:
+                mean = np.nan
+                std = np.nan
+
+            # avoid division by zero
+            if std == 0 or np.isnan(std):
+                mask = np.full(arr.shape, False)  # no outliers if std is zero
+            else:
+                mask = np.abs((arr - mean) / std) >= zscore  # boolean mask
+
+            v_list = list(v)
+            for i in range(len(v_list)):
+                if isinstance(v_list[i], np.ndarray) and np.any(mask):  
+                    v_list[i] = v_list[i].copy().astype(float)  # copy only if we modify it
+                    v_list[i][mask] = np.nan  # apply NaN mask
+
+            # set key with updated list of arrays
+            oib_diffs_filt[k] = v_list
+
+        if inplace:
+            self._set_diffs(oib_diffs_filt)
+        else:
+            return oib_diffs_filt
 
 
 def split_by_uppercase(text):

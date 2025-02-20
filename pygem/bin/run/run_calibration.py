@@ -690,7 +690,7 @@ def run(list_packed_vars):
                     icebridge._filter_on_pixel_count(pctl=pygem_prms['calib']['data']['oib']['oib_filter_pctl'], inplace=True)
                     icebridge._terminus_mask(inplace=True)
                     icebridge._remove_outliers_zscore(zscore=3, inplace=True)
-                    icebridge._rebin(agg=pygem_prms['calib']['data']['oib']['oib_rebin'])
+                    icebridge._rebin(agg=pygem_prms['calib']['data']['oib']['oib_rebin'], inplace=True)
                     # only retain diffs for survey dates within model timespan
                     _, oib_inds, pygem_inds = np.intersect1d(list(icebridge.oib_diffs.keys()), gdir.dates_table.date.to_numpy(), return_indices=True)
                     # filter dictionary to retain only the diffs during times that fall within PyGEM calibration period

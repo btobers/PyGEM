@@ -133,7 +133,7 @@ class oib:
         # get bin centers
         self._set_centers((np.asarray(self.oib_dict[ssn][list(self.oib_dict[ssn].keys())[0]]['bin_vals']['bin_start_vec']) + 
                     np.asarray(self.oib_dict[ssn][list(self.oib_dict[ssn].keys())[0]]['bin_vals']['bin_stop_vec'])) / 2)
-        self._set_area(self.oib_dict['aad_dict']['hist_bin_areas_m2'])
+        self._set_area(np.asarray(self.oib_dict['aad_dict']['hist_bin_areas_m2']))
         edges = list(self.oib_dict[ssn][list(self.oib_dict[ssn].keys())[0]]['bin_vals']['bin_start_vec'])
         edges.append(self.oib_dict[ssn][list(self.oib_dict[ssn].keys())[0]]['bin_vals']['bin_stop_vec'][-1])
         self._set_edges(np.asarray(edges))

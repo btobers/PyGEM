@@ -34,7 +34,7 @@ def inverse_z_normalize(z_params, means,  std_devs):
 
 def log_normal_density(x, **kwargs):
     """
-    Computes the log probability density of a normal distribution.
+    Computes the per-element log probability density of a normal distribution.
 
     Parameters:
     - x: Input tensor where you want to evaluate the log probability.
@@ -42,21 +42,21 @@ def log_normal_density(x, **kwargs):
     - sigma: Standard deviation of the normal distribution.
 
     Returns:
-        Log probability density at the given input tensor x.
+        The average log probability density over all elements in x.
     """
     mu, sigma = kwargs['mu'], kwargs['sigma']
 
-    # flatten arrays and get dimensionality
+    # Flatten arrays
     x = x.flatten()
     mu = mu.flatten()
     sigma = sigma.flatten()
-    k = mu.shape[-1]
 
-    return torch.tensor([
-                        -k/2.*torch.log(torch.tensor(2*np.pi)) - 
-                        torch.log(sigma).nansum() -
-                        0.5*(((x-mu)/sigma)**2).nansum()
-                        ])
+    # Compute log normal density per element
+    return torch.Tensor([
+                    (-0.5 * torch.log(torch.tensor(2 * np.pi)) - 
+                    torch.log(sigma) - 
+                    0.5 * ((x - mu) / sigma) ** 2).nanmean()
+                    ])
 
 def log_gamma_density(x, **kwargs):
     """

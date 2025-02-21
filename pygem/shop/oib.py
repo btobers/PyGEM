@@ -21,9 +21,9 @@ pygem_prms = config.read_config()  # This reads the configuration file
 class oib:
     def __init__(self, rgi6id='', rgi7id=''):
         self.oib_datpath = f"{pygem_prms['root']}/{pygem_prms['calib']['data']['oib']['oib_relpath']}"
-        self.rgi7_6_df = pd.read_csv(f"{self.oib_datpath}/../oibak_rgi6_rgi7_ids.csv")
-        self.rgi7_6_df['rgi7id'] = self.rgi7_6_df['rgi7id'].str.split('RGI2000-v7.0-G-').str[1]
-        self.rgi7_6_df['rgi6id'] = self.rgi7_6_df['rgi6id'].str.split('RGI60-').str[1]
+        self.rgi7_6_df = pd.read_csv(f"{self.oib_datpath}/../RGI2000-v7.0-G-01_alaska-rgi6_links.csv")
+        self.rgi7_6_df['rgi7_id'] = self.rgi7_6_df['rgi7_id'].str.split('RGI2000-v7.0-G-').str[1]
+        self.rgi7_6_df['rgi6_id'] = self.rgi7_6_df['rgi6_id'].str.split('RGI60-').str[1]
         self.rgi6id = rgi6id
         self.rgi7id = rgi7id
         self.name = None
@@ -61,16 +61,16 @@ class oib:
 
         """
         self.rgi6id = self.rgi6id.split('.')[0].zfill(2) + '.' + self.rgi6id.split('.')[1]
-        # rgi7id = self.rgi7_6_df.loc[lambda self.rgi7_6_df: self.rgi7_6_df['rgi6id'] == rgi6id,'rgi7id'].tolist()
-        rgi7id = self.rgi7_6_df.loc[self.rgi7_6_df['rgi6id'] == self.rgi6id, 'rgi7id'].tolist()
-        if len(rgi7id)==1:
-            self.rgi7id =  rgi7id[0]
+        df_sub = self.rgi7_6_df.loc[self.rgi7_6_df['rgi6_id'] == self.rgi6id,:]
+
+        if len(df_sub)==1:
+            self.rgi7id = df_sub.iloc[0]['rgi7_id']
             if debug:
                 print(f'RGI6:{self.rgi6id} -> RGI7:{self.rgi7id}')
-        elif len(rgi7id)==0:
+        elif len(df_sub)==0:
             raise IndexError(f'No matching RGI7Id for {self.rgi6id}')
-        elif len(rgi7id)>1:
-            raise IndexError(f'More than one matching RGI7Id for {self.rgi6id}')
+        elif len(df_sub)>1:
+            self.rgi6id = df_sub.sort_values(by='rgi6_area_fraction', ascending=False).iloc[0]['rgi7_id']
         
 
     def _rgi7torgi6id(self, debug=False):
@@ -79,16 +79,15 @@ class oib:
 
         """
         self.rgi7id = self.rgi7id.split('-')[0].zfill(2) + '-' + self.rgi7id.split('-')[1]
-        # rgi6id = self.rgi7_6_df.loc[lambda self.rgi7_6_df: self.rgi7_6_df['rgi7id'] == rgi7id,'rgi6id'].tolist()
-        rgi6id = self.rgi7_6_df.loc[self.rgi7_6_df['rgi7id'] == self.rgi7id, 'rgi6id'].tolist()
-        if len(rgi6id)==1:
-            self.rgi6id = rgi6id[0]
+        df_sub = self.rgi7_6_df.loc[self.rgi7_6_df['rgi7_id'] == self.rgi7id,:]
+        if len(df_sub)==1:
+            self.rgi6id = df_sub.iloc[0]['rgi6_id']
             if debug:
                 print(f'RGI7:{self.rgi7id} -> RGI6:{self.rgi6id}')
-        elif len(rgi6id)==0:
+        elif len(df_sub)==0:
             raise IndexError(f'No matching RGI6Id for {self.rgi7id}')
-        elif len(rgi6id)>1:
-            raise IndexError(f'More than one matching RGI6Id for {self.rgi7id}')
+        elif len(df_sub)>1:
+            self.rgi6id = df_sub.sort_values(by='rgi7_area_fraction', ascending=False).iloc[0]['rgi6_id']
 
 
     def _load(self):
@@ -282,10 +281,11 @@ class oib:
                 # check if the difference is approximately an integer multiple of years ± n month
                 if rem <= tolerance_months or rem >= 12 - tolerance_months:
                     self.dbl_diffs['dates'].append((date1,date2))
+                    # self.dbl_diffs['dh'].append((self.oib_diffs[date2][0] - self.oib_diffs[date1][0]) / round(delta_mon/12))
                     self.dbl_diffs['dh'].append(self.oib_diffs[date2][0] - self.oib_diffs[date1][0])
                     # self.dbl_diffs['sigma'].append((self.oib_diffs[date2][1] + self.oib_diffs[date1][1]) / 2)
-                    self.dbl_diffs['sigma'].append(self.oib_diffs[date2][1] + self.oib_diffs[date1][1])
-                    # break  # Stop looking for further matches for date1
+                    self.dbl_diffs['sigma'].append((self.oib_diffs[date2][1] + self.oib_diffs[date1][1]) / 1.349)
+                    break  # Stop looking for further matches for date1
 
         # column stack dh and sigmas into single 2d array
         if len(self.dbl_diffs['dh'])>0:
@@ -299,16 +299,26 @@ class oib:
             self.dbl_diffs['sigma'] = None
 
 
-    def _elevchange_to_masschange(self, ela, density_ablation=pygem_prms['constants']['density_ice'], density_accumulation=700):
+    def _elevchange_to_masschange(self, ela, density_ablation=(pygem_prms['constants']['density_ice'],17), density_accumulation=(700,200)):
         # convert elevation changes to mass change using piecewise density conversion
         if self.dbl_diffs['dh'] is not None:
             # populate density conversion column corresponding to bin center elevation
             conversion_factor = np.ones(len(self.bin_centers))
-            conversion_factor[np.where(self.bin_centers<ela)] = density_ablation
-            conversion_factor[np.where(self.bin_centers>=ela)] = density_accumulation
+            sigma = np.ones(len(self.bin_centers))
+            accum = np.where(self.bin_centers>=ela)
+            abl = np.invert(accum)
+            conversion_factor[abl] = density_ablation[0]
+            sigma[abl] = density_ablation[1]
+            conversion_factor[accum] = density_accumulation[0]
+            sigma[accum] = density_ablation[1]
             # get change in mass per unit area as (dz  * rho) [dmass / dm2]
             self.dbl_diffs['dmda'] = self.dbl_diffs['dh'] * conversion_factor[:,np.newaxis]
-            self.dbl_diffs['dmda_err'] = self.dbl_diffs['sigma'] * conversion_factor[:,np.newaxis]
+            # propogate uncertainty in dh and rho to mass change
+            self.dbl_diffs['dmda_err'] = (self.dbl_diffs['dmda'] * 
+                                                                np.sqrt(
+                                                                        ((self.dbl_diffs['sigma']/self.dbl_diffs['dh'])**2) + 
+                                                                        ((sigma[:,np.newaxis]/conversion_factor[:,np.newaxis])**2)
+                                                                        ))
         else:
             self.dbl_diffs['dmda'] = None
             self.dbl_diffs['dmda_err'] = None
@@ -381,6 +391,41 @@ class oib:
             self._set_diffs(oib_diffs_filt)
         else:
             return oib_diffs_filt
+        
+    ### not fully working yet ###
+    # def _savgol_smoother(self, window=5, poly=2, inplace=False):
+    #     """
+    #     smooths an array using Savitzky-Golay filter with NaN handling
+
+    #     parameters:
+    #     - window: int, window size
+    #     - poly: int, polynomial degree
+    #     - inplace: bool, whether to modify in place
+    #     """
+    #     oib_diffs_filt = {}
+    #     x = self._get_centers()
+
+    #     for k, v in self._get_diffs().items():
+    #         filtered_data = []
+    #         for i in range(2):  # apply filtering to both v[0] and v[1]
+    #             arr = v[i].astype(float)  # convert to float
+    #             mask = np.isnan(arr)
+    #             data_filled = np.copy(arr)
+    #             # interpolate NaNs
+    #             data_filled[mask] = np.interp(x[mask], x[~mask], arr[~mask])
+    #             # apply Savitzky-Golay filter
+    #             smoothed = signal.savgol_filter(data_filled, window_length=window, polyorder=poly)
+    #             # restore NaNs
+    #             smoothed[mask] = np.nan
+    #             filtered_data.append(smoothed)
+
+    #         # populate filtered dictionary with smoothed data
+    #         oib_diffs_filt[k] = [filtered_data[0], filtered_data[1], v[2]]
+
+    #     if inplace:
+    #         self._set_diffs(oib_diffs_filt)
+    #     else:
+    #         return oib_diffs_filt
 
 
 def split_by_uppercase(text):

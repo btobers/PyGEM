@@ -373,7 +373,6 @@ def effective_n(x):
     except:
         return None
 
-
 def plot_chain(m_primes, m_chain, mb_obs, ar, title, ms=1, fontsize=8, show=False, fpath=None):
     # Plot the trace of the parameters
     fig, axes = plt.subplots(5, 1, figsize=(6, 8), sharex=True)
@@ -446,7 +445,6 @@ def plot_chain(m_primes, m_chain, mb_obs, ar, title, ms=1, fontsize=8, show=Fals
         plt.show(block=True)  # wait until the figure is closed
     plt.close(fig)
     return
-
 
 def plot_resid_hist(obs, preds, title, fontsize=8, show=False, fpath=None):
     # Plot the trace of the parameters

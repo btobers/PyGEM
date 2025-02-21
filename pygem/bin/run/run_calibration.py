@@ -706,7 +706,7 @@ def run(list_packed_vars):
                     l3_proc(gdir)
                     yrs = list(range(args.ref_startyear, args.ref_endyear + 1))
                     ela = tasks.compute_ela(gdir, years=yrs)
-                    icebridge._elevchange_to_masschange(ela=ela.mean())
+                    icebridge._elevchange_to_masschange(ela=ela.min())
                     # return icebridge.dbl_diffs and attach to gdir
                     gdir.oib_diffs = icebridge._get_dbldiffs()
                     # ensure data to calibrate against

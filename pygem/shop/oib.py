@@ -283,16 +283,19 @@ class oib:
                     self.dbl_diffs['dates'].append((date1,date2))
                     # self.dbl_diffs['dh'].append((self.oib_diffs[date2][0] - self.oib_diffs[date1][0]) / round(delta_mon/12))
                     self.dbl_diffs['dh'].append(self.oib_diffs[date2][0] - self.oib_diffs[date1][0])
-                    # self.dbl_diffs['sigma'].append((self.oib_diffs[date2][1] + self.oib_diffs[date1][1]) / 2)
-                    self.dbl_diffs['sigma'].append((self.oib_diffs[date2][1] + self.oib_diffs[date1][1]) / 1.349)
+                    self.dbl_diffs['sigma'].append(np.sqrt((self.oib_diffs[date2][1]/1.349)**2 + (self.oib_diffs[date1][1]/1.349)**2))
                     break  # Stop looking for further matches for date1
 
         # column stack dh and sigmas into single 2d array
         if len(self.dbl_diffs['dh'])>0:
             self.dbl_diffs['dh'] = np.column_stack(self.dbl_diffs['dh'])
             self.dbl_diffs['sigma'] = np.column_stack(self.dbl_diffs['sigma'])
-        else:
-            self.dbl_diffs['dh'] = np.nan
+            # get rid of any all-nan dbl-diffs (where cop30 offsets may not have overlapped)
+            mask = ~np.all(np.isnan(self.dbl_diffs['dh']), axis=0)
+            self.dbl_diffs['dates'] = [val for val, keep in zip(self.dbl_diffs['dates'], mask) if keep]
+            self.dbl_diffs['dh'] = self.dbl_diffs['dh'][:,mask]
+            self.dbl_diffs['sigma'] = self.dbl_diffs['sigma'][:,mask]
+
         # check if deltah is all nan
         if np.isnan(self.dbl_diffs['dh']).all():
             self.dbl_diffs['dh'] = None

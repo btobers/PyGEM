@@ -121,7 +121,7 @@ class oib:
                 diffs = np.asarray(self.oib_dict[ssn][yr]['bin_vals']['bin_median_diffs_vec'])
                 counts = np.asarray(self.oib_dict[ssn][yr]['bin_vals']['bin_count_vec'])
                 # uncertainty represented by IQR
-                sigmas = np.asarray(self.oib_dict[ssn][yr]['bin_vals']['bin_interquartile_range_diffs_vec'])
+                sigmas = np.asarray(self.oib_dict[ssn][yr]['bin_vals']['bin_std_diffs_vec'])
                 # add [diffs, sigma, counts] to master dictionary
                 diffs_dict[round_to_nearest_month(dt_obj)] = [diffs,sigmas,counts]
         # Sort the dictionary by date keys
@@ -259,7 +259,7 @@ class oib:
 
 
     # double difference all oib diffs from the same season 1+ year apart
-    def _dbl_diff(self, tolerance_months=1):
+    def _dbl_diff(self, tolerance_months=0):
         # prepopulate dbl_diffs dictionary object will structure with dates, dh, sigma
         # where dates is a tuple for each double differenced array in the format of (date1,date2),
         # where date1's cop30 differences were subtracted from date2's to get the dh values for that time span,
@@ -283,7 +283,7 @@ class oib:
                     self.dbl_diffs['dates'].append((date1,date2))
                     # self.dbl_diffs['dh'].append((self.oib_diffs[date2][0] - self.oib_diffs[date1][0]) / round(delta_mon/12))
                     self.dbl_diffs['dh'].append(self.oib_diffs[date2][0] - self.oib_diffs[date1][0])
-                    self.dbl_diffs['sigma'].append(np.sqrt((self.oib_diffs[date2][1]/1.349)**2 + (self.oib_diffs[date1][1]/1.349)**2))
+                    self.dbl_diffs['sigma'].append(np.sqrt((self.oib_diffs[date2][1])**2 + (self.oib_diffs[date1][1])**2))
                     break  # Stop looking for further matches for date1
 
         # column stack dh and sigmas into single 2d array
@@ -313,15 +313,15 @@ class oib:
             conversion_factor[abl] = density_ablation[0]
             sigma[abl] = density_ablation[1]
             conversion_factor[accum] = density_accumulation[0]
-            sigma[accum] = density_ablation[1]
+            sigma[accum] = density_accumulation[1]
             # get change in mass per unit area as (dz  * rho) [dmass / dm2]
             self.dbl_diffs['dmda'] = self.dbl_diffs['dh'] * conversion_factor[:,np.newaxis]
             # propogate uncertainty in dh and rho to mass change
-            self.dbl_diffs['dmda_err'] = (self.dbl_diffs['dmda'] * 
-                                                                np.sqrt(
-                                                                        ((self.dbl_diffs['sigma']/self.dbl_diffs['dh'])**2) + 
-                                                                        ((sigma[:,np.newaxis]/conversion_factor[:,np.newaxis])**2)
-                                                                        ))
+            self.dbl_diffs['dmda_err'] = (np.abs(self.dbl_diffs['dmda']) * 
+                                        np.sqrt(
+                                                ((self.dbl_diffs['sigma']/self.dbl_diffs['dh'])**2) + 
+                                                ((sigma[:,np.newaxis]/conversion_factor[:,np.newaxis])**2)
+                                                ))
         else:
             self.dbl_diffs['dmda'] = None
             self.dbl_diffs['dmda_err'] = None

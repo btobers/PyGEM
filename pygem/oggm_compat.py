@@ -231,7 +231,8 @@ def oggm_spinup(gdir):
                             spinup_start_yr=1979,  # When to start the spinup
                             minimise_for='area',  # what target to match at the RGI date
                             output_filesuffix='_dynamic_area',  # Where to write the output
-                            ye=2020,  # When the simulation should stop
+                            target_yr=2000, # The year at which we want to match area or volume. If None, gdir.rgi_date + 1 is used (the default)
+                            ye=2000,  # When the simulation should stop
                             # first_guess_t_spinup = , could be passed as input argument for each step in the sampler based on prior tbias, current default first guess is -2
     )
     fmd_dynamic = flowline.FileModel(gdir.get_filepath('model_geometry', filesuffix='_dynamic_area'))

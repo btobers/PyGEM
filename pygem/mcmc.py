@@ -32,7 +32,7 @@ def z_normalize(params, means, std_devs):
 def inverse_z_normalize(z_params, means,  std_devs):
     return z_params * std_devs + means
 
-def log_normal_density(x, **kwargs):
+def log_normal_density(x, method="sum", **kwargs):
     """
     Computes the per-element log probability density of a normal distribution.
 
@@ -46,17 +46,18 @@ def log_normal_density(x, **kwargs):
     """
     mu, sigma = kwargs['mu'], kwargs['sigma']
 
-    # Flatten arrays
-    x = x.flatten()
-    mu = mu.flatten()
-    sigma = sigma.flatten()
+    # ensure tensors are flattened
+    x, mu, sigma = map(torch.flatten, (x, mu, sigma))
 
-    # Compute log normal density per element
-    return torch.Tensor([
-                    (-0.5 * torch.log(torch.tensor(2 * np.pi)) - 
-                    torch.log(sigma) - 
-                    0.5 * ((x - mu) / sigma) ** 2).nanmean()
-                    ])
+    # compute log normal density per element
+    log_prob = -0.5 * torch.log(torch.tensor(2 * np.pi)) - torch.log(sigma) - 0.5 * ((x - mu) / sigma) ** 2
+
+    if method == "sum":
+        return torch.tensor([log_prob.nansum()])
+    elif method == "mean":
+        return torch.tensor([log_prob.nanmean()])
+    else:
+        raise ValueError("method must be one of ['sum', 'mean']")
 
 def log_gamma_density(x, **kwargs):
     """

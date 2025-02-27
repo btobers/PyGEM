@@ -32,17 +32,17 @@ def z_normalize(params, means, std_devs):
 def inverse_z_normalize(z_params, means,  std_devs):
     return z_params * std_devs + means
 
-def log_normal_density(x, method="sum", **kwargs):
+def log_normal_density(x, **kwargs):
     """
-    Computes the per-element log probability density of a normal distribution.
+    Evaluate the logarithm of the probability density function of a normal distribution.
 
     Parameters:
-    - x: Input tensor where you want to evaluate the log probability.
-    - mu: Mean of the normal distribution.
-    - sigma: Standard deviation of the normal distribution.
+    - x: input data point or batch of data points.
+    - mu: mean of the normal distribution (diagonal covariance matrix).
+    - sigma: standard deviation (diagonal elements of the covariance matrix).
 
     Returns:
-        The average log probability density over all elements in x.
+        log probability density
     """
     mu, sigma = kwargs['mu'], kwargs['sigma']
 
@@ -50,14 +50,12 @@ def log_normal_density(x, method="sum", **kwargs):
     x, mu, sigma = map(torch.flatten, (x, mu, sigma))
 
     # compute log normal density per element
-    log_prob = -0.5 * torch.log(torch.tensor(2 * np.pi)) - torch.log(sigma) - 0.5 * ((x - mu) / sigma) ** 2
-
-    if method == "sum":
-        return torch.tensor([log_prob.nansum()])
-    elif method == "mean":
-        return torch.tensor([log_prob.nanmean()])
-    else:
-        raise ValueError("method must be one of ['sum', 'mean']")
+    k = mu.shape[-1]
+    return torch.tensor([
+                        -k/2.*torch.log(torch.tensor(2*np.pi)) - 
+                        torch.log(sigma).nansum() -
+                        0.5*(((x-mu)/sigma)**2).nansum()
+                        ])
 
 def log_gamma_density(x, **kwargs):
     """

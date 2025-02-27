@@ -317,11 +317,11 @@ class oib:
             # get change in mass per unit area as (dz  * rho) [dmass / dm2]
             self.dbl_diffs['dmda'] = self.dbl_diffs['dh'] * conversion_factor[:,np.newaxis]
             # propogate uncertainty in dh and rho to mass change
-            self.dbl_diffs['dmda_err'] = (np.abs(self.dbl_diffs['dmda']) * 
-                                        np.sqrt(
-                                                ((self.dbl_diffs['sigma']/self.dbl_diffs['dh'])**2) + 
-                                                ((sigma[:,np.newaxis]/conversion_factor[:,np.newaxis])**2)
-                                                ))
+            self.dbl_diffs['dmda_err'] = (np.abs(self.dbl_diffs['dmda']) *
+                                                                            np.sqrt(
+                                                                                ((self.dbl_diffs['sigma']/self.dbl_diffs['dh'])**2) + 
+                                                                                ((sigma[:,np.newaxis]/conversion_factor[:,np.newaxis])**2)
+                                                                            ))
         else:
             self.dbl_diffs['dmda'] = None
             self.dbl_diffs['dmda_err'] = None

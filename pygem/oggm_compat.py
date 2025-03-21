@@ -202,15 +202,15 @@ def l3_proc(gdir):
     OGGGM L3 preprocessing steps
     """
     # process climate_hisotrical data to gdir
-    workflow.execute_entity_task(tasks.process_climate_data, gdir);
+    workflow.execute_entity_task(tasks.process_climate_data, gdir)
 
     # process mb_calib data from geodetic mass balance
     workflow.execute_entity_task(tasks.mb_calibration_from_geodetic_mb,
                                 gdir, informed_threestep=True, overwrite_gdir=True,
-                                );
+                                )
 
     # glacier bed inversion
-    workflow.execute_entity_task(tasks.apparent_mb_from_any_mb, gdir);
+    workflow.execute_entity_task(tasks.apparent_mb_from_any_mb, gdir)
     workflow.calibrate_inversion_from_consensus(
         gdir,
         apply_fs_on_mismatch=True,
@@ -218,9 +218,9 @@ def l3_proc(gdir):
         filter_inversion_output=True,  # this partly filters the overdeepening due to
         # the equilibrium assumption for retreating glaciers (see. Figure 5 of Maussion et al. 2019)
         volume_m3_reference=None,  # here you could provide your own total volume estimate in m3
-    );
+    )
     # after inversion, merge data from preprocessing tasks form mode_flowlines
-    workflow.execute_entity_task(tasks.init_present_time_glacier, gdir);
+    workflow.execute_entity_task(tasks.init_present_time_glacier, gdir)
 
 
 def oggm_spinup(gdir):
@@ -234,7 +234,7 @@ def oggm_spinup(gdir):
                             target_yr=2000, # The year at which we want to match area or volume. If None, gdir.rgi_date + 1 is used (the default)
                             ye=2000,  # When the simulation should stop
                             # first_guess_t_spinup = , could be passed as input argument for each step in the sampler based on prior tbias, current default first guess is -2
-    )
+    );
     fmd_dynamic = flowline.FileModel(gdir.get_filepath('model_geometry', filesuffix='_dynamic_area'))
     fmd_dynamic.run_until(2000)
     return fmd_dynamic.fls # flowlines after dynamic spinup at year 2000

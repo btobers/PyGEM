@@ -121,7 +121,7 @@ class oib:
                 diffs = np.asarray(self.oib_dict[ssn][yr]['bin_vals']['bin_median_diffs_vec'])
                 counts = np.asarray(self.oib_dict[ssn][yr]['bin_vals']['bin_count_vec'])
                 # uncertainty represented by IQR
-                sigmas = np.asarray(self.oib_dict[ssn][yr]['bin_vals']['bin_std_diffs_vec'])
+                sigmas = np.asarray(self.oib_dict[ssn][yr]['bin_vals']['bin_interquartile_range_diffs_vec'])
                 # add [diffs, sigma, counts] to master dictionary
                 diffs_dict[round_to_nearest_month(dt_obj)] = [diffs,sigmas,counts]
         # Sort the dictionary by date keys
@@ -283,7 +283,8 @@ class oib:
                     self.dbl_diffs['dates'].append((date1,date2))
                     # self.dbl_diffs['dh'].append((self.oib_diffs[date2][0] - self.oib_diffs[date1][0]) / round(delta_mon/12))
                     self.dbl_diffs['dh'].append(self.oib_diffs[date2][0] - self.oib_diffs[date1][0])
-                    self.dbl_diffs['sigma'].append(np.sqrt((self.oib_diffs[date2][1])**2 + (self.oib_diffs[date1][1])**2))
+                    # self.dbl_diffs['sigma'].append(np.sqrt((self.oib_diffs[date2][1])**2 + (self.oib_diffs[date1][1])**2))
+                    self.dbl_diffs['sigma'].append(self.oib_diffs[date2][1] + self.oib_diffs[date1][1])
                     break  # Stop looking for further matches for date1
 
         # column stack dh and sigmas into single 2d array
@@ -300,31 +301,6 @@ class oib:
         if np.isnan(self.dbl_diffs['dh']).all():
             self.dbl_diffs['dh'] = None
             self.dbl_diffs['sigma'] = None
-
-
-    def _elevchange_to_masschange(self, ela, density_ablation=(pygem_prms['constants']['density_ice'],17), density_accumulation=(700,200)):
-        # convert elevation changes to mass change using piecewise density conversion
-        if self.dbl_diffs['dh'] is not None:
-            # populate density conversion column corresponding to bin center elevation
-            conversion_factor = np.ones(len(self.bin_centers))
-            sigma = np.ones(len(self.bin_centers))
-            accum = np.where(self.bin_centers>=ela)
-            abl = np.invert(accum)
-            conversion_factor[abl] = density_ablation[0]
-            sigma[abl] = density_ablation[1]
-            conversion_factor[accum] = density_accumulation[0]
-            sigma[accum] = density_accumulation[1]
-            # get change in mass per unit area as (dz  * rho) [dmass / dm2]
-            self.dbl_diffs['dmda'] = self.dbl_diffs['dh'] * conversion_factor[:,np.newaxis]
-            # propogate uncertainty in dh and rho to mass change
-            self.dbl_diffs['dmda_err'] = (np.abs(self.dbl_diffs['dmda']) *
-                                                                            np.sqrt(
-                                                                                ((self.dbl_diffs['sigma']/self.dbl_diffs['dh'])**2) + 
-                                                                                ((sigma[:,np.newaxis]/conversion_factor[:,np.newaxis])**2)
-                                                                            ))
-        else:
-            self.dbl_diffs['dmda'] = None
-            self.dbl_diffs['dmda_err'] = None
 
 
     def _filter_on_pixel_count(self, pctl=15, inplace=False):

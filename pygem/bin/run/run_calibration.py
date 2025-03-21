@@ -108,6 +108,8 @@ def getparser():
                         help='number of samples in a chain for MCMC calibration')
     parser.add_argument('-burn_pct',action='store',type=int,default=pygem_prms['calib']['MCMC_params']['mcmc_burn_pct'],
                     help='burn-in percentage for MCMC calibration')
+    parser.add_argument('-thin',action='store',type=int,default=pygem_prms['calib']['MCMC_params']['thin_interval'],
+                    help='thinning factor for MCMC calibration')
     
     # flags
     parser.add_argument('-oib', action='store_true', default=pygem_prms['calib']['MCMC_params']['option_calib_binned_dh'],
@@ -706,18 +708,17 @@ def run(list_packed_vars):
                     l3_proc(gdir)
                     yrs = list(range(args.ref_startyear, args.ref_endyear + 1))
                     ela = tasks.compute_ela(gdir, years=yrs)
-                    icebridge._elevchange_to_masschange(ela=ela.min())
                     # return icebridge.dbl_diffs and attach to gdir
                     gdir.oib_diffs = icebridge._get_dbldiffs()
                     # ensure data to calibrate against
-                    if gdir.oib_diffs['dmda'] is None:
+                    if gdir.oib_diffs['dh'] is None:
                         raise ValueError("No valid OIB data to calibrate against.")
                     # store bin_edges and bin_area
                     gdir.oib_diffs['bin_edges'] = icebridge._get_edges()
                     gdir.oib_diffs['bin_centers'] = icebridge._get_centers()
                     gdir.oib_diffs['bin_area'] = icebridge._get_area()
                     # store ela info
-                    gdir.oib_diffs['ela'] = {
+                    gdir.ela = {
                                         'yr': yrs,
                                         'z': ela.values.tolist()
                                         }
@@ -1345,25 +1346,34 @@ def run(list_packed_vars):
                             initials = xs
                     return initials
                 
-                def mb_max(*args, **kwargs):
-                    """ Model parameters cannot completely melt the glacier (psuedo-likelihood fxn) """
+                def mb_max(**kwargs):
+                    """Psuedo-likelihood functionto ensure glacier is not completely melted."""
                     if kwargs['massbal'] < mb_max_loss:
                         return -np.inf
                     else:
                         return 0
 
-                def must_melt(kp, tbias, ddfsnow, **kwargs):
-                    """ Likelihood function for mass balance [mwea] based on model parametersr (psuedo-likelihood fxn) """                          
+                def must_melt(**kwargs):
+                    """ Psuedo-likelihood function for mass balance [mwea] based on model parameters."""                          
                     modelprms_copy = modelprms.copy()
-                    modelprms_copy['tbias'] = float(tbias)
-                    modelprms_copy['kp'] = float(kp)
-                    modelprms_copy['ddfsnow'] = float(ddfsnow)
+                    modelprms_copy['tbias'] = float(kwargs['tbias'])
+                    modelprms_copy['kp'] = float(kwargs['kp'])
+                    modelprms_copy['ddfsnow'] = float(kwargs['ddfsnow'])
                     modelprms_copy['ddfice'] = modelprms_copy['ddfsnow'] / pygem_prms['sim']['params']['ddfsnow_iceratio']
                     mb_total_minelev = calc_mb_total_minelev(modelprms_copy)
                     if mb_total_minelev < 0:
                         return 0
                     else:
                         return -np.inf
+                
+                def rho_constraints(**kwargs):
+                    """Psuedo-likelihood function for ablation and accumulation area densities."""
+                    rhoabl = float(kwargs['rhoabl'])
+                    rhoacc = float(kwargs['rhoacc'])
+                    if rhoacc > rhoabl:
+                        return -np.inf
+                    else:
+                        return 0
                 # ---------------------------------                    
 
                 # ---------------------------------
@@ -1411,6 +1421,8 @@ def run(list_packed_vars):
                             'tbias':    {'type':pygem_prms['calib']['MCMC_params']['tbias_disttype'], 'mu':float(tbias_mu) , 'sigma':float(tbias_sigma), 'low':safe_float(getattr(pygem_prms,'tbias_bndlow',None)), 'high':safe_float(getattr(pygem_prms,'tbias_bndhigh',None))},
                             'kp':       {'type':pygem_prms['calib']['MCMC_params']['kp_disttype'], 'alpha':float(kp_gamma_alpha), 'beta':float(kp_gamma_beta), 'low':safe_float(getattr(pygem_prms,'kp_bndlow',None)), 'high':safe_float(getattr(pygem_prms,'kp_bndhigh',None))},
                             'ddfsnow':  {'type':pygem_prms['calib']['MCMC_params']['ddfsnow_disttype'], 'mu':pygem_prms['calib']['MCMC_params']['ddfsnow_mu'], 'sigma':pygem_prms['calib']['MCMC_params']['ddfsnow_sigma'] ,'low':float(pygem_prms['calib']['MCMC_params']['ddfsnow_bndlow']), 'high':float(pygem_prms['calib']['MCMC_params']['ddfsnow_bndhigh'])},
+                            'rhoabl':   {'type':'normal', 'mu':900., 'sigma':17.},
+                            'rhoacc':   {'type':'normal', 'mu':600., 'sigma':150.},
                             }
                 # define distributions from priors for sampling initials
                 prior_dists = get_priors(priors)
@@ -1449,8 +1461,7 @@ def run(list_packed_vars):
                                 gdir.oib_diffs['bin_edges'],
                                 gdir.oib_diffs['bin_centers'])
                     # append deltah obs and undto obs list
-                    # obs.append((torch.tensor(gdir.oib_diffs['dmda']),torch.tensor([10])))
-                    obs.append((torch.tensor(gdir.oib_diffs['dmda']),torch.tensor(gdir.oib_diffs['dmda_err'])))
+                    obs.append((torch.tensor(gdir.oib_diffs['dh']),torch.tensor(gdir.oib_diffs['sigma'])))
                 # if there are more observations to calibrate against, simply append a tuple of (obs, variance) to obs list
                 # e.g. obs.append((torch.tensor(dmda_array),torch.tensor(dmda_err_array)))
                 elif pygem_prms['calib']['MCMC_params']['option_use_emulator']:
@@ -1462,12 +1473,23 @@ def run(list_packed_vars):
 
                 # instantiate mbPosterior given priors, and observed values
                 # note, mbEmulator.eval expects the modelprms to be ordered like so: [tbias, kp, ddfsnow], so priors and initial guesses must also be ordered as such)
-                priors = {key: priors[key] for key in ['tbias','kp','ddfsnow'] if key in priors}
-                mb = mcmc.mbPosterior(obs, priors, mb_func=mbfxn, mb_args=mbargs, potential_fxns=[mb_max, must_melt])
-
+                priors = {key: priors[key] for key in ['tbias','kp','ddfsnow','rhoabl','rhoacc'] if key in priors}
+                # mb = mcmc.mbPosterior(obs, priors, mb_func=mbfxn, mb_args=mbargs, potential_fxns=[mb_max, must_melt], ela=min(gdir.ela['z']), bin_z=gdir.oib_diffs['bin_centers'])
+                mb = mcmc.mbPosterior(
+                                        obs, 
+                                        priors, 
+                                        mb_func=mbfxn, 
+                                        mb_args=mbargs, 
+                                        potential_fxns=[mb_max, must_melt, rho_constraints], 
+                                        ela=min(gdir.ela['z']) if hasattr(gdir, 'ela') else None, 
+                                        bin_z=gdir.oib_diffs['bin_centers'] if hasattr(gdir, 'oib_diffs') else None, 
+                                    )
                 # prepare export modelprms dictionary
                 modelprms_export = {}
-                for k in ['tbias','kp','ddfsnow','ddfice','mb_mwea','ar']:
+                ks = ['tbias','kp','ddfsnow','ddfice','mb_mwea','ar']
+                if args.oib:
+                    ks+=['dmda','rhoabl','rhoacc']
+                for k in ks:
                     modelprms_export[k] = {}
                 # -------------------
 
@@ -1475,6 +1497,7 @@ def run(list_packed_vars):
                 # ----- run MCMC -----
                 # --------------------               
                 try:
+                # for f in ['b']:
                     ### loop over chains, adjust initial guesses accordingly. done in a while loop as to repeat a chain up to one time if it remained stuck throughout ###
                     n_chain=0
                     repeat=False
@@ -1486,31 +1509,28 @@ def run(list_packed_vars):
                         # for all chains > 0, randomly sample from regional priors
                         else:
                             initial_guesses = torch.tensor(get_initials(prior_dists))
+                        if args.oib:
+                            initial_guesses = torch.cat((initial_guesses, torch.tensor([np.log(900.), np.log(600.)])))
                         if debug:
-                            print(f"{glacier_str} chain {n_chain} initials:\ttbias: {initial_guesses[0]:.2f}, kp: {initial_guesses[1]:.2f}, ddfsnow: {initial_guesses[2]:.4f}")
-                        initial_guesses_z = mcmc.z_normalize(initial_guesses, mb.means, mb.stds)
+                            print(f"{glacier_str} chain {n_chain} initials:\ntbias: {initial_guesses[0]:.2f}, kp: {initial_guesses[1]:.2f}, ddfsnow: {initial_guesses[2]:.4f}, rhoabl: {np.exp(initial_guesses[3]):.1f}, rhoacc: {np.exp(initial_guesses[4]):.1f}")
 
                         # instantiate sampler
                         sampler = mcmc.Metropolis(mb.means, mb.stds)
 
                         # draw samples
-                        m_chain_z, pred_chain, m_primes_z, pred_primes, _, ar = sampler.sample(initial_guesses_z, 
+                        m_chain, pred_chain, m_primes, pred_primes, _, ar = sampler.sample(initial_guesses, 
                                                                                                     mb.log_posterior, 
                                                                                                     n_samples=args.chain_length, 
                                                                                                     h=pygem_prms['calib']['MCMC_params']['mcmc_step'], 
                                                                                                     burnin=int(args.burn_pct/100*args.chain_length), 
-                                                                                                    thin_factor=pygem_prms['calib']['MCMC_params']['thin_interval'], 
+                                                                                                    thin_factor=args.thin, 
                                                                                                     progress_bar=args.progress_bar)
 
                         # Check condition at the end
-                        if (m_chain_z[:, 0] == m_chain_z[0, 0]).all():
+                        if (m_chain[:, 0] == m_chain[0, 0]).all():
                             if not repeat and n_chain!=0:
                                 repeat = True
                                 continue
-
-                        # inverse z-normalize the samples to original parameter space
-                        m_chain = mcmc.inverse_z_normalize(m_chain_z, mb.means, mb.stds)
-                        m_primes = mcmc.inverse_z_normalize(m_primes_z, mb.means, mb.stds)
 
                         # concatenate mass balance
                         m_chain = torch.cat((m_chain, torch.tensor(pred_chain[0]).reshape(-1,1)), dim=1)
@@ -1531,6 +1551,7 @@ def run(list_packed_vars):
                                 show=False
                             else:
                                 show=True
+
                             mcmc.plot_chain(m_primes, m_chain, obs[0], ar, glacier_str, show=show, fpath=f'{fp}/{glacier_str}-chain{n_chain}.png')
                             for i in pred_chain.keys():
                                 mcmc.plot_resid_hist(obs[i], pred_chain[i], glacier_str, show=show, fpath=f'{fp}/{glacier_str}-chain{n_chain}-residuals-{i}.png')
@@ -1542,13 +1563,13 @@ def run(list_packed_vars):
                         modelprms_export['ddfsnow'][chain_str] = m_chain[:,2].tolist()
                         modelprms_export['ddfice'][chain_str] = (m_chain[:,2] /
                                                                   pygem_prms['sim']['params']['ddfsnow_iceratio']).tolist()
-                        modelprms_export['mb_mwea'][chain_str] = m_chain[:,3].tolist()
+                        modelprms_export['mb_mwea'][chain_str] = m_chain[:,-1].tolist()
                         modelprms_export['ar'][chain_str] = ar
                         if args.oib:
-                            if 'dmda' not in modelprms_export.keys():
-                                modelprms_export['dmda'] = {} # add key to export dmda predictions
                             dh_preds = [preds.flatten().tolist() for preds in pred_chain[1]]
                             modelprms_export['dmda'][chain_str] = dh_preds
+                            modelprms_export['rhoabl'][chain_str] = np.exp(m_chain[:,3]).tolist()
+                            modelprms_export['rhoacc'][chain_str] = np.exp(m_chain[:,4]).tolist()
 
                         # increment n_chain only if the current iteration was a repeat
                         n_chain += 1
@@ -1564,7 +1585,7 @@ def run(list_packed_vars):
                         modelprms_export['dmda']['area'] = gdir.oib_diffs['bin_area'].tolist()
                         modelprms_export['dmda']['obs'] = [ob.flatten().tolist() for ob in obs[1]]
                         modelprms_export['dmda']['dates'] = [(dt1.strftime("%Y-%m-%d"), dt2.strftime("%Y-%m-%d")) for dt1, dt2 in gdir.oib_diffs['dates']]
-                        modelprms_export['dmda']['ela'] = gdir.oib_diffs['ela']
+                        modelprms_export['dmda']['ela'] = gdir.ela
                     modelprms_fn = glacier_str + '-modelprms_dict.json'
                     modelprms_fp = [(pygem_prms['root'] + f'/Output/calibration/' + glacier_str.split('.')[0].zfill(2) 
                                     + '/')]

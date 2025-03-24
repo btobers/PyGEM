@@ -180,8 +180,7 @@ class mbPosterior:
             params_copy = params.copy()
             prior_type = params_copy.pop('type')
             function_to_call = log_prob_fxn_map[prior_type]
-            # log_prior.append(function_to_call(m[i], **params_copy))
-            log_prior.append(function_to_call(torch.exp(m[i]) if 'rho' in key else m[i], **params_copy))
+            log_prior.append(function_to_call(m[i], **params_copy))
         log_prior = torch.stack(log_prior).sum()
         return log_prior
 
@@ -194,8 +193,8 @@ class mbPosterior:
             elif i==1:
                 # multiply obs by modeled density
                 rho = np.ones_like(self.bin_z)
-                rho[self.abl_mask] = torch.exp(m[-2])
-                rho[~self.abl_mask] = torch.exp(m[-1])
+                rho[self.abl_mask] = m[-2]
+                rho[~self.abl_mask] = m[-1]
                 rho=torch.tensor(rho)
                 log_likehood+=log_normal_density(self.obs[i][0]*rho[:,np.newaxis], **{'mu': pred, 'sigma': self.obs[i][1]*rho[:,np.newaxis]})
         return log_likehood
@@ -208,8 +207,8 @@ class mbPosterior:
                                                     'tbias':m[1],
                                                     'ddfsnow':m[2],
                                                     'massbal':self.preds[0],
-                                                    'rhoabl':torch.exp(m[-2]), 
-                                                    'rhoacc':torch.exp(m[-1])})
+                                                    'rhoabl':m[-2], 
+                                                    'rhoacc':m[-1]})
         return log_potential
 
     # get log posterior (sum of log prior, log likelihood and log potential)
@@ -286,11 +285,8 @@ class Metropolis:
             step = torch.randn(n)*h
 
             # update m_prime based on normalized values
-            m_prime = z_normalize(m_0[:3], self.means[:3], self.stds[:3]) + step[:3]
-            m_prime = inverse_z_normalize(m_prime[:3], self.means[:3], self.stds[:3])
-
-            if len(step)>3:
-                m_prime = torch.cat((m_prime, m_0[-2:] + step[-2:]))
+            m_prime = z_normalize(m_0, self.means, self.stds) + step
+            m_prime = inverse_z_normalize(m_prime, self.means, self.stds)
 
             # Compute new unscaled log-posterior
             P_1, pred_1 = log_posterior(m_prime)
@@ -309,7 +305,6 @@ class Metropolis:
                 pred_0 = pred_1
                 # update naccept
                 self.naccept += 1
-                print('accept')
 
             # Only append to the chain if we're past burn-in.
             if i>burnin:
@@ -439,8 +434,8 @@ def plot_chain(m_primes, m_chain, mb_obs, ar, title, ms=1, fontsize=8, show=Fals
     axes[2].set_ylabel(r'$fsnow$', fontsize=fontsize)
 
     if n>4:
-        m_chain[:, 3] = np.exp(m_chain[:, 3])
-        m_primes[:, 3] = np.exp(m_primes[:, 3])
+        m_chain[:, 3] = m_chain[:, 3]
+        m_primes[:, 3] = m_primes[:, 3]
         axes[3].plot(m_primes[:, 3],'.',ms=ms, c='tab:blue')
         axes[3].plot(m_chain[:, 3],'.',ms=ms, c='tab:orange')
         axes[3].plot([],[],label=f'median={np.median(m_chain[:, 3]):.3f}\niqr={np.subtract(*np.percentile(m_chain[:, 3], [75, 25])):.3f}')
@@ -448,8 +443,8 @@ def plot_chain(m_primes, m_chain, mb_obs, ar, title, ms=1, fontsize=8, show=Fals
         legs.append(l3)
         axes[3].set_ylabel(r'$\rho_{abl}$', fontsize=fontsize)
 
-        m_chain[:, 4] = np.exp(m_chain[:, 4])
-        m_primes[:, 4] = np.exp(m_primes[:, 4])
+        m_chain[:, 4] = m_chain[:, 4]
+        m_primes[:, 4] = m_primes[:, 4]
         axes[4].plot(m_primes[:, 4],'.',ms=ms, c='tab:blue')
         axes[4].plot(m_chain[:, 4],'.',ms=ms, c='tab:orange')
         axes[4].plot([],[],label=f'median={np.median(m_chain[:, 4]):.3f}\niqr={np.subtract(*np.percentile(m_chain[:, 4], [75, 25])):.3f}')

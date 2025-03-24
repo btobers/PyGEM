@@ -1370,7 +1370,7 @@ def run(list_packed_vars):
                     """Psuedo-likelihood function for ablation and accumulation area densities."""
                     rhoabl = float(kwargs['rhoabl'])
                     rhoacc = float(kwargs['rhoacc'])
-                    if rhoacc > rhoabl:
+                    if (rhoacc < 0) or (rhoabl < 0) or (rhoacc > rhoabl):
                         return -np.inf
                     else:
                         return 0
@@ -1510,9 +1510,9 @@ def run(list_packed_vars):
                         else:
                             initial_guesses = torch.tensor(get_initials(prior_dists))
                         if args.oib:
-                            initial_guesses = torch.cat((initial_guesses, torch.tensor([np.log(900.), np.log(600.)])))
+                            initial_guesses = torch.cat((initial_guesses, torch.tensor([900., 600.])))
                         if debug:
-                            print(f"{glacier_str} chain {n_chain} initials:\ntbias: {initial_guesses[0]:.2f}, kp: {initial_guesses[1]:.2f}, ddfsnow: {initial_guesses[2]:.4f}, rhoabl: {np.exp(initial_guesses[3]):.1f}, rhoacc: {np.exp(initial_guesses[4]):.1f}")
+                            print(f"{glacier_str} chain {n_chain} initials:\ntbias: {initial_guesses[0]:.2f}, kp: {initial_guesses[1]:.2f}, ddfsnow: {initial_guesses[2]:.4f}, rhoabl: {initial_guesses[3]:.1f}, rhoacc: {initial_guesses[4]:.1f}")
 
                         # instantiate sampler
                         sampler = mcmc.Metropolis(mb.means, mb.stds)
@@ -1568,8 +1568,8 @@ def run(list_packed_vars):
                         if args.oib:
                             dh_preds = [preds.flatten().tolist() for preds in pred_chain[1]]
                             modelprms_export['dmda'][chain_str] = dh_preds
-                            modelprms_export['rhoabl'][chain_str] = np.exp(m_chain[:,3]).tolist()
-                            modelprms_export['rhoacc'][chain_str] = np.exp(m_chain[:,4]).tolist()
+                            modelprms_export['rhoabl'][chain_str] = m_chain[:,3].tolist()
+                            modelprms_export['rhoacc'][chain_str] = m_chain[:,4].tolist()
 
                         # increment n_chain only if the current iteration was a repeat
                         n_chain += 1

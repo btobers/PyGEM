@@ -1422,7 +1422,7 @@ def run(list_packed_vars):
                             'kp':       {'type':pygem_prms['calib']['MCMC_params']['kp_disttype'], 'alpha':float(kp_gamma_alpha), 'beta':float(kp_gamma_beta), 'low':safe_float(getattr(pygem_prms,'kp_bndlow',None)), 'high':safe_float(getattr(pygem_prms,'kp_bndhigh',None))},
                             'ddfsnow':  {'type':pygem_prms['calib']['MCMC_params']['ddfsnow_disttype'], 'mu':pygem_prms['calib']['MCMC_params']['ddfsnow_mu'], 'sigma':pygem_prms['calib']['MCMC_params']['ddfsnow_sigma'] ,'low':float(pygem_prms['calib']['MCMC_params']['ddfsnow_bndlow']), 'high':float(pygem_prms['calib']['MCMC_params']['ddfsnow_bndhigh'])},
                             'rhoabl':   {'type':'normal', 'mu':900., 'sigma':17.},
-                            'rhoacc':   {'type':'normal', 'mu':600., 'sigma':150.},
+                            'rhoacc':   {'type':'normal', 'mu':600., 'sigma':60.},
                             }
                 # define distributions from priors for sampling initials
                 prior_dists = get_priors(priors)

@@ -12,6 +12,7 @@ import argparse
 import inspect
 import multiprocessing
 import os
+import copy
 import sys
 import time
 import math
@@ -38,9 +39,9 @@ config.ensure_config()
 pygem_prms = config.read_config()
 from pygem import mcmc
 from pygem import class_climate
-from pygem.massbalance import PyGEMMassBalance
+from pygem.massbalance import PyGEMMassBalance, PyGEMMassBalance_wrapper
 #from pygem.glacierdynamics import MassRedistributionCurveModel
-from pygem.oggm_compat import single_flowline_glacier_directory, single_flowline_glacier_directory_with_calving, l3_proc, oggm_spinup
+from pygem.oggm_compat import single_flowline_glacier_directory, single_flowline_glacier_directory_with_calving, l3_proc, oggm_spinup, update_cfg
 import pygem.pygem_modelsetup as modelsetup
 from pygem.shop import debris, mbdata, icethickness, oib
 from pygem.utils._funcs import append_json
@@ -565,7 +566,8 @@ def run(list_packed_vars):
     # Unpack variables
     glac_no = list_packed_vars[1]
     gcm_name = list_packed_vars[2]
-    
+    ncores = list_packed_vars[3]
+
     parser = getparser()
     args = parser.parse_args()
     debug = args.debug
@@ -748,8 +750,71 @@ def run(list_packed_vars):
         if (fls is not None) and (gdir.mbdata is not None) and (glacier_area.sum() > 0):
             # spinup
             if args.spinup:
-                l3_proc(gdir)
-                fls = oggm_spinup(gdir)
+                dt_spinup = modelsetup.datesmodelrun(startyear=1979, endyear=2019)
+                gcm_spinup = class_climate.GCM(name=gcm_name)
+                # Air temperature [degC]
+                gcm_temp_spinup, gcm_dates_spinup = gcm_spinup.importGCMvarnearestneighbor_xarray(gcm_spinup.temp_fn, gcm_spinup.temp_vn, main_glac_rgi, dt_spinup)
+                if pygem_prms['mb']['option_ablation'] == 2 and gcm_name in ['ERA5']:
+                    gcm_tempstd_spinup, gcm_dates_spinup = gcm_spinup.importGCMvarnearestneighbor_xarray(gcm_spinup.tempstd_fn, gcm_spinup.tempstd_vn,
+                                                                                    main_glac_rgi, dt_spinup)
+                else:
+                    gcm_tempstd_spinup = np.zeros(gcm_temp.shape)
+                # Precipitation [m]
+                gcm_prec_spinup, gcm_dates_spinup = gcm_spinup.importGCMvarnearestneighbor_xarray(gcm_spinup.prec_fn, gcm_spinup.prec_vn, main_glac_rgi, dt_spinup)
+                # Elevation [m asl]
+                gcm_elev_spinup = gcm_spinup.importGCMfxnearestneighbor_xarray(gcm_spinup.elev_fn, gcm_spinup.elev_vn, main_glac_rgi)
+                # Lapse rate [degC m-1]
+                gcm_lr_spinup, gcm_dates_spinup = gcm_spinup.importGCMvarnearestneighbor_xarray(gcm_spinup.lr_fn, gcm_spinup.lr_vn, main_glac_rgi, dt_spinup)
+    
+                if not glacier_rgi_table['TermType'] in [1,5] or not pygem_prms['setup']['include_frontalablation']:
+                    gdir_spinup = single_flowline_glacier_directory(glacier_str, working_dir = utils.gettempdir('tmp', reset=True))
+                    gdir_spinup.is_tidewater = False
+                else:
+                    # set reset=True to overwrite non-calving directory that may already exist
+                    gdir_spinup = single_flowline_glacier_directory_with_calving(glacier_str)
+                    gdir_spinup.is_tidewater = True
+                
+                # Add climate data to glacier directory
+                gdir_spinup.historical_climate = {'elev': gcm_elev_spinup[glac],
+                                        'temp': gcm_temp_spinup[glac,:],
+                                        'tempstd': gcm_tempstd_spinup[glac,:],
+                                        'prec': gcm_prec_spinup[glac,:],
+                                        'lr': gcm_lr_spinup[glac,:]}
+                gdir_spinup.dates_table = dt_spinup
+
+                # get modelprms from regional priors
+                modelprms_spinup = {'kp': 1.8,
+                                    'tbias': 0.28,
+                                    'ddfsnow': 0.0041,
+                                    'ddfice': 0.0041 / .7,
+                                    'tsnow_threshold': 1,
+                                    'precgrad': 0.0001}
+                # add debris to model_flowlines
+                debris.debris_binned(gdir_spinup, fl_str='inversion_flowlines')
+
+                # update oggm.cfg
+                update_cfg({"store_model_geometry": True, "continue_on_error": False}, "PARAMS")
+
+                # do bed inversion
+                l3_proc(gdir_spinup,
+                        **{'mb_model': PyGEMMassBalance_wrapper(gdir=gdir_spinup, 
+                                                modelprms=modelprms_spinup, 
+                                                glacier_rgi_table=glacier_rgi_table, 
+                                                fls=gdir_spinup.read_pickle('inversion_flowlines'))})
+                
+                # add debris to model_flowlines
+                debris.debris_binned(gdir_spinup, fl_str='model_flowlines')
+                # tasks.compute_downstream_line(gdir_spinup)
+                # tasks.compute_downstream_bedshape(gdir_spinup)
+                tasks.init_present_time_glacier(gdir_spinup) # adds bins below
+
+                # do spinup
+                fls = oggm_spinup(gdir_spinup,
+                                **{'mb_model_historical' : PyGEMMassBalance_wrapper(gdir=gdir_spinup, 
+                                            modelprms=modelprms_spinup, 
+                                            glacier_rgi_table=glacier_rgi_table, 
+                                            fls=gdir_spinup.read_pickle('model_flowlines'))})
+
             
             modelprms = {'kp': pygem_prms['sim']['params']['kp'],
                         'tbias': pygem_prms['sim']['params']['tbias'],
@@ -1547,7 +1612,7 @@ def run(list_packed_vars):
                             if args.oib:
                                 fp += 'dmda/' 
                             os.makedirs(fp, exist_ok=True)
-                            if args.ncores > 1:
+                            if ncores > 1:
                                 show=False
                             else:
                                 show=True
@@ -2153,7 +2218,7 @@ def main():
     # Pack variables for multiprocessing
     list_packed_vars = []
     for count, glac_no_lst in enumerate(glac_no_lsts):
-        list_packed_vars.append([count, glac_no_lst, gcm_name])
+        list_packed_vars.append([count, glac_no_lst, gcm_name, num_cores])
     # Parallel processing
     if num_cores > 1:
         print('Processing in parallel with ' + str(num_cores) + ' cores...')

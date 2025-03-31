@@ -5,6 +5,7 @@ copyright © 2018 David Rounce <drounce@cmu.edu
 
 Distrubted under the MIT lisence
 """
+from functools import partial
 # External libraries
 import numpy as np
 # Local libraries
@@ -64,6 +65,7 @@ class PyGEMMassBalance(MassBalanceModel):
         self.icethickness_initial = getattr(fls[fl_id], 'thick', None)
         self.width_initial = fls[fl_id].widths_m
         self.glacier_area_initial = fls[fl_id].widths_m * fls[fl_id].dx_meter
+        # print(fls[fl_id].widths_m.shape)
         self.heights = fls[fl_id].surface_h
         if pygem_prms['mb']['include_debris'] and not ignore_debris and not gdir.is_tidewater:
             try:
@@ -196,6 +198,8 @@ class PyGEMMassBalance(MassBalanceModel):
             year = year % (pygem_prms['climate']['gcm_endyear'] - pygem_prms['climate']['gcm_startyear'])
 
         fl = fls[fl_id]
+        # print(fl.widths_m.shape)
+
         np.testing.assert_allclose(heights, fl.surface_h)
         glacier_area_t0 = fl.widths_m * fl.dx_meter
         glacier_area_initial = self.glacier_area_initial
@@ -1006,3 +1010,40 @@ class PyGEMMassBalance(MassBalanceModel):
             elif option_ddf_firn == 1:
                 surfacetype_ddf_dict[3] = np.mean([modelprms['ddfsnow'],modelprms['ddfice']])
         return surfacetype_ddf_dict
+    
+
+# define PyGEM mb class wrapper to feed to OGGM
+class PyGEMMassBalance_wrapper(MassBalanceModel):
+    def __init__(self, gdir, modelprms, glacier_rgi_table,
+                 mb_model_class=PyGEMMassBalance,
+                 fls=None,
+                 **kwargs
+                ):
+        super().__init__()
+
+        self.gdir = gdir
+        self.mb_model_class = partial(mb_model_class, **kwargs)
+        self.modelprms = modelprms
+        self.glacier_rgi_table = glacier_rgi_table
+        self.fls = fls
+        self.hemisphere=gdir.hemisphere
+        self.spinup_startyr=self.gdir.dates_table.year.values[0]
+
+    @property
+    def mbmod(self):
+        return self.mb_model_class(gdir=self.gdir,
+                                   modelprms=self.modelprms,
+                                   glacier_rgi_table=self.glacier_rgi_table,
+                                   fls=self.fls
+                                  )
+
+    def get_annual_mb(self, heights, year=None, fls=None, fl_id=None,
+                      debug=True, option_areaconstant=False):
+
+        return self.mbmod.get_annual_mb(
+            heights=heights,
+            year=year%self.spinup_startyr,
+            fls=fls,
+            fl_id=fl_id,
+            debug=True,
+            option_areaconstant=option_areaconstant)

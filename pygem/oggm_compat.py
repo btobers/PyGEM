@@ -197,7 +197,31 @@ def single_flowline_glacier_directory_with_calving(rgi_id, reset=pygem_prms['ogg
     return gdir
 
 
-def l3_proc(gdir):
+def update_cfg(updates, dict_name="PARAMS"):
+    """
+    Update keys in the OGGMs config.
+
+    Parameters:
+    dict (str): The dictionary in the config to update.
+    updates (dict): Key-Value pairs to be updated.
+
+    Returns:
+    None: The function updates `cfg` in place.
+    """
+    try:
+        target_dict = getattr(cfg, dict_name)
+        for key, subdict in updates.items():
+            if key in target_dict and isinstance(target_dict[key], dict) and isinstance(subdict, dict):
+                for subkey, value in subdict.items():
+                    if subkey in cfg[dict][key]:
+                        target_dict[key][subkey] = value
+            elif key in target_dict:
+                target_dict[key] = subdict
+    except Exception as err:
+        print(err)
+
+
+def l3_proc(gdir, **kwargs):
     """
     OGGGM L3 preprocessing steps
     """
@@ -210,7 +234,8 @@ def l3_proc(gdir):
                                 )
 
     # glacier bed inversion
-    workflow.execute_entity_task(tasks.apparent_mb_from_any_mb, gdir)
+    workflow.execute_entity_task(tasks.apparent_mb_from_any_mb, gdir, **kwargs)
+
     workflow.calibrate_inversion_from_consensus(
         gdir,
         apply_fs_on_mismatch=True,
@@ -223,22 +248,20 @@ def l3_proc(gdir):
     workflow.execute_entity_task(tasks.init_present_time_glacier, gdir)
 
 
-def oggm_spinup(gdir):
+def oggm_spinup(gdir ,**kwargs):
+
     # perform OGGM dynamic spinup and return flowline model at year 2000
-    # define mb_model for spinup
     workflow.execute_entity_task(tasks.run_dynamic_spinup,
                             gdir,
                             spinup_start_yr=1979,  # When to start the spinup
                             minimise_for='area',  # what target to match at the RGI date
-                            output_filesuffix='_dynamic_area',  # Where to write the output
                             target_yr=2000, # The year at which we want to match area or volume. If None, gdir.rgi_date + 1 is used (the default)
-                            ye=2000,  # When the simulation should stop
+                            ye=2020,  # When the simulation should stop
                             # first_guess_t_spinup = , could be passed as input argument for each step in the sampler based on prior tbias, current default first guess is -2
-    );
-    fmd_dynamic = flowline.FileModel(gdir.get_filepath('model_geometry', filesuffix='_dynamic_area'))
+                            **kwargs);
+    fmd_dynamic = flowline.FileModel(gdir.get_filepath('model_geometry', filesuffix='_dynamic_spinup'))
     fmd_dynamic.run_until(2000)
     return fmd_dynamic.fls # flowlines after dynamic spinup at year 2000
-
 
 def create_empty_glacier_directory(rgi_id):
     """Create empty GlacierDirectory for PyGEM's alternative ice thickness products

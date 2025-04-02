@@ -188,6 +188,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     # RGI glacier number
+    glac_no = None
     if args.rgi_glac_number:
         glac_no = args.rgi_glac_number
         # format appropriately

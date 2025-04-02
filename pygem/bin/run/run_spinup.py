@@ -1,4 +1,4 @@
-import sys, shutil
+import sys, shutil, json
 import argparse
 import numpy as np
 import pandas as pd
@@ -196,7 +196,7 @@ if __name__ == "__main__":
     elif args.rgi_glac_number_fn is not None:
         with open(args.rgi_glac_number_fn, 'r') as f:
             glac_no = json.load(f)
-    else:
+    if glac_no is None:
         raise ValueError('Need to specify either -rgi_glac_number or -rgi_glac_number_fn')
 
     # call main

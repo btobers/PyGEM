@@ -44,7 +44,7 @@ from pygem.massbalance import PyGEMMassBalance, PyGEMMassBalance_wrapper
 from pygem.oggm_compat import single_flowline_glacier_directory, single_flowline_glacier_directory_with_calving, l3_proc, oggm_spinup, update_cfg
 import pygem.pygem_modelsetup as modelsetup
 from pygem.shop import debris, mbdata, icethickness, oib
-from pygem.utils._funcs import append_json
+from pygem.utils._funcs import append_json, interp1d_fill_gaps
 
 from oggm import cfg
 from oggm import graphics
@@ -53,6 +53,7 @@ from oggm import utils
 from oggm import workflow
 from oggm.core.flowline import FluxBasedModel
 from oggm.core.massbalance import apparent_mb_from_any_mb
+from oggm.core import flowline
 #from oggm.core import climate
 #from oggm.core.flowline import FluxBasedModel
 #from oggm.core.inversion import calving_flux_from_depth
@@ -252,7 +253,10 @@ def get_dmda(gdir, modelprms, glacier_rgi_table, fls=None, glen_a_multiplier=Non
 
     ### get monthly ice thickness
     # grab components of interest
-    h_annual = mbmod.glac_bin_icethickness_annual # glacier thickness [m ice]
+    h_annual = mbmod.glac_bin_icethickness_annual # glacier thickness [m ice], (nbins, nyears)
+
+    # set any < 0 thickness to nan
+    h_annual[h_annual <= 0] = np.nan
 
     dotb_monthly = mbmod.glac_bin_massbalclim # climatic mass balance [m w.e.] per month
     # convert to m ice
@@ -288,7 +292,9 @@ def get_dmda(gdir, modelprms, glacier_rgi_table, fls=None, glen_a_multiplier=Non
         m_monthly_spec = np.column_stack([stats.binned_statistic(x=nfls[0].surface_h, values=x, statistic=np.nanmean, bins=bin_edges)[0] for x in m_monthly_spec.T])
 
     # interpolate over any empty bins
-    m_monthly_spec_ = np.column_stack([interp1d(bin_centers[~np.isnan(x)],x[~np.isnan(x)], kind='linear', fill_value="extrapolate")(bin_centers) for x in m_monthly_spec.T])
+    m_monthly_spec_ = np.column_stack([
+        interp1d_fill_gaps(x.copy()) for x in m_monthly_spec.T
+    ])
 
     # difference each set of inds in diff_inds_map
     dmda = np.column_stack([m_monthly_spec_[:,tup[1]] - m_monthly_spec_[:,tup[0]] for tup in diff_inds_map])
@@ -707,7 +713,6 @@ def run(list_packed_vars):
                     # double difference to remove the COP30 signal from the relative OIB surface elevation changes
                     icebridge._dbl_diff()
                     # convert to mass changes
-                    l3_proc(gdir)
                     yrs = list(range(args.ref_startyear, args.ref_endyear + 1))
                     ela = tasks.compute_ela(gdir, years=yrs)
                     # return icebridge.dbl_diffs and attach to gdir
@@ -740,7 +745,13 @@ def run(list_packed_vars):
                     else:
                         fs = pygem_prms['sim']['oggm_dynamics']['fs']
                         glen_a_multiplier = pygem_prms['sim']['oggm_dynamics']['glen_a_multiplier']
-                        
+
+                    # spinup
+                    if args.spinup:
+                        fmd_dynamic = flowline.FileModel(gdir.get_filepath('model_geometry', filesuffix='_dynamic_spinup_pygem'))
+                        fmd_dynamic.run_until(2000)
+                        fls = fmd_dynamic.fls
+                            
             except Exception as err:
                 fls = None  # set fls to None as to not proceed with calibration
                 if debug:
@@ -748,74 +759,7 @@ def run(list_packed_vars):
 
         # ----- CALIBRATION OPTIONS ------
         if (fls is not None) and (gdir.mbdata is not None) and (glacier_area.sum() > 0):
-            # spinup
-            if args.spinup:
-                dt_spinup = modelsetup.datesmodelrun(startyear=1979, endyear=2019)
-                gcm_spinup = class_climate.GCM(name=gcm_name)
-                # Air temperature [degC]
-                gcm_temp_spinup, gcm_dates_spinup = gcm_spinup.importGCMvarnearestneighbor_xarray(gcm_spinup.temp_fn, gcm_spinup.temp_vn, main_glac_rgi, dt_spinup)
-                if pygem_prms['mb']['option_ablation'] == 2 and gcm_name in ['ERA5']:
-                    gcm_tempstd_spinup, gcm_dates_spinup = gcm_spinup.importGCMvarnearestneighbor_xarray(gcm_spinup.tempstd_fn, gcm_spinup.tempstd_vn,
-                                                                                    main_glac_rgi, dt_spinup)
-                else:
-                    gcm_tempstd_spinup = np.zeros(gcm_temp.shape)
-                # Precipitation [m]
-                gcm_prec_spinup, gcm_dates_spinup = gcm_spinup.importGCMvarnearestneighbor_xarray(gcm_spinup.prec_fn, gcm_spinup.prec_vn, main_glac_rgi, dt_spinup)
-                # Elevation [m asl]
-                gcm_elev_spinup = gcm_spinup.importGCMfxnearestneighbor_xarray(gcm_spinup.elev_fn, gcm_spinup.elev_vn, main_glac_rgi)
-                # Lapse rate [degC m-1]
-                gcm_lr_spinup, gcm_dates_spinup = gcm_spinup.importGCMvarnearestneighbor_xarray(gcm_spinup.lr_fn, gcm_spinup.lr_vn, main_glac_rgi, dt_spinup)
-    
-                if not glacier_rgi_table['TermType'] in [1,5] or not pygem_prms['setup']['include_frontalablation']:
-                    gdir_spinup = single_flowline_glacier_directory(glacier_str, working_dir = utils.gettempdir('tmp', reset=True))
-                    gdir_spinup.is_tidewater = False
-                else:
-                    # set reset=True to overwrite non-calving directory that may already exist
-                    gdir_spinup = single_flowline_glacier_directory_with_calving(glacier_str)
-                    gdir_spinup.is_tidewater = True
-                
-                # Add climate data to glacier directory
-                gdir_spinup.historical_climate = {'elev': gcm_elev_spinup[glac],
-                                        'temp': gcm_temp_spinup[glac,:],
-                                        'tempstd': gcm_tempstd_spinup[glac,:],
-                                        'prec': gcm_prec_spinup[glac,:],
-                                        'lr': gcm_lr_spinup[glac,:]}
-                gdir_spinup.dates_table = dt_spinup
 
-                # get modelprms from regional priors
-                modelprms_spinup = {'kp': 1.8,
-                                    'tbias': 0.28,
-                                    'ddfsnow': 0.0041,
-                                    'ddfice': 0.0041 / .7,
-                                    'tsnow_threshold': 1,
-                                    'precgrad': 0.0001}
-                # add debris to model_flowlines
-                debris.debris_binned(gdir_spinup, fl_str='inversion_flowlines')
-
-                # update oggm.cfg
-                update_cfg({"store_model_geometry": True, "continue_on_error": False}, "PARAMS")
-
-                # do bed inversion
-                l3_proc(gdir_spinup,
-                        **{'mb_model': PyGEMMassBalance_wrapper(gdir=gdir_spinup, 
-                                                modelprms=modelprms_spinup, 
-                                                glacier_rgi_table=glacier_rgi_table, 
-                                                fls=gdir_spinup.read_pickle('inversion_flowlines'))})
-                
-                # add debris to model_flowlines
-                debris.debris_binned(gdir_spinup, fl_str='model_flowlines')
-                # tasks.compute_downstream_line(gdir_spinup)
-                # tasks.compute_downstream_bedshape(gdir_spinup)
-                tasks.init_present_time_glacier(gdir_spinup) # adds bins below
-
-                # do spinup
-                fls = oggm_spinup(gdir_spinup,
-                                **{'mb_model_historical' : PyGEMMassBalance_wrapper(gdir=gdir_spinup, 
-                                            modelprms=modelprms_spinup, 
-                                            glacier_rgi_table=glacier_rgi_table, 
-                                            fls=gdir_spinup.read_pickle('model_flowlines'))})
-
-            
             modelprms = {'kp': pygem_prms['sim']['params']['kp'],
                         'tbias': pygem_prms['sim']['params']['tbias'],
                         'ddfsnow': pygem_prms['sim']['params']['ddfsnow'],
@@ -1561,8 +1505,8 @@ def run(list_packed_vars):
                 # --------------------
                 # ----- run MCMC -----
                 # --------------------               
-                try:
-                # for f in ['b']:
+                # try:
+                for f in ['b']:
                     ### loop over chains, adjust initial guesses accordingly. done in a while loop as to repeat a chain up to one time if it remained stuck throughout ###
                     n_chain=0
                     repeat=False
@@ -1681,14 +1625,14 @@ def run(list_packed_vars):
                     with open(mcmc_good_fp + txt_fn_good, "w") as text_file:
                         text_file.write(glacier_str + ' successfully exported mcmc results')
                 
-                except Exception as err:
-                    # MCMC LOG FAILURE
-                    mcmc_fail_fp = pygem_prms['root'] + f'/Output/mcmc_fail{outpath_sfix}/' + glacier_str.split('.')[0].zfill(2) + '/'
-                    if not os.path.exists(mcmc_fail_fp):
-                        os.makedirs(mcmc_fail_fp, exist_ok=True)
-                    txt_fn_fail = glacier_str + "-mcmc_fail.txt"
-                    with open(mcmc_fail_fp + txt_fn_fail, "w") as text_file:
-                        text_file.write(glacier_str + f' failed to complete MCMC: {err}')
+                # except Exception as err:
+                #     # MCMC LOG FAILURE
+                #     mcmc_fail_fp = pygem_prms['root'] + f'/Output/mcmc_fail{outpath_sfix}/' + glacier_str.split('.')[0].zfill(2) + '/'
+                #     if not os.path.exists(mcmc_fail_fp):
+                #         os.makedirs(mcmc_fail_fp, exist_ok=True)
+                #     txt_fn_fail = glacier_str + "-mcmc_fail.txt"
+                #     with open(mcmc_fail_fp + txt_fn_fail, "w") as text_file:
+                #         text_file.write(glacier_str + f' failed to complete MCMC: {err}')
                 # --------------------
 
 

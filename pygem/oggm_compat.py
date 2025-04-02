@@ -104,7 +104,7 @@ def single_flowline_glacier_directory(rgi_id, reset=pygem_prms['oggm']['overwrit
     if not os.path.isfile(gdir.get_filepath('mb_calib_pygem')):
         workflow.execute_entity_task(mbdata.mb_df_to_gdir, gdir)
     # debris thickness and melt enhancement factors
-    if not os.path.isfile(gdir.get_filepath('debris_ed')) or os.path.isfile(gdir.get_filepath('debris_hd')):
+    if not os.path.isfile(gdir.get_filepath('debris_ed')) or not os.path.isfile(gdir.get_filepath('debris_hd')):
         workflow.execute_entity_task(debris.debris_to_gdir, gdir)
         workflow.execute_entity_task(debris.debris_binned, gdir)
 
@@ -220,48 +220,6 @@ def update_cfg(updates, dict_name="PARAMS"):
     except Exception as err:
         print(err)
 
-
-def l3_proc(gdir, **kwargs):
-    """
-    OGGGM L3 preprocessing steps
-    """
-    # process climate_hisotrical data to gdir
-    workflow.execute_entity_task(tasks.process_climate_data, gdir)
-
-    # process mb_calib data from geodetic mass balance
-    workflow.execute_entity_task(tasks.mb_calibration_from_geodetic_mb,
-                                gdir, informed_threestep=True, overwrite_gdir=True,
-                                )
-
-    # glacier bed inversion
-    workflow.execute_entity_task(tasks.apparent_mb_from_any_mb, gdir, **kwargs)
-
-    workflow.calibrate_inversion_from_consensus(
-        gdir,
-        apply_fs_on_mismatch=True,
-        error_on_mismatch=True,  # if you running many glaciers some might not work
-        filter_inversion_output=True,  # this partly filters the overdeepening due to
-        # the equilibrium assumption for retreating glaciers (see. Figure 5 of Maussion et al. 2019)
-        volume_m3_reference=None,  # here you could provide your own total volume estimate in m3
-    )
-    # after inversion, merge data from preprocessing tasks form mode_flowlines
-    workflow.execute_entity_task(tasks.init_present_time_glacier, gdir)
-
-
-def oggm_spinup(gdir ,**kwargs):
-
-    # perform OGGM dynamic spinup and return flowline model at year 2000
-    workflow.execute_entity_task(tasks.run_dynamic_spinup,
-                            gdir,
-                            spinup_start_yr=1979,  # When to start the spinup
-                            minimise_for='area',  # what target to match at the RGI date
-                            target_yr=2000, # The year at which we want to match area or volume. If None, gdir.rgi_date + 1 is used (the default)
-                            ye=2020,  # When the simulation should stop
-                            # first_guess_t_spinup = , could be passed as input argument for each step in the sampler based on prior tbias, current default first guess is -2
-                            **kwargs);
-    fmd_dynamic = flowline.FileModel(gdir.get_filepath('model_geometry', filesuffix='_dynamic_spinup'))
-    fmd_dynamic.run_until(2000)
-    return fmd_dynamic.fls # flowlines after dynamic spinup at year 2000
 
 def create_empty_glacier_directory(rgi_id):
     """Create empty GlacierDirectory for PyGEM's alternative ice thickness products

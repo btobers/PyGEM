@@ -8,6 +8,7 @@ Distrubted under the MIT lisence
 Functions that didn't fit into other modules
 """
 import numpy as np
+from scipy.interpolate import interp1d
 import json
 # Local libraries
 import pygem.setup.config as config
@@ -55,8 +56,45 @@ def annualweightedmean_array(var, dates_table):
     return var_annual
 
 
+def interp1d_fill_gaps(x):
+    """
+    Interpolate valid (non-NaN) values in a 1D array using linear interpolation, 
+    without extrapolating from NaNs at the edges.
 
-import json
+    Parameters:
+    ----------
+    x : ndarray
+        A 1D array with possible NaN values to interpolate.
+
+    Returns:
+    -------
+    x : ndarray
+        The 1D array with interpolated values for the NaN entries, leaving the valid values unchanged.
+    
+    Notes:
+    ------
+    This function assumes that the input array `x` has evenly spaced data. It interpolates within the valid range of
+    data and does not extrapolate beyond the first and last valid data points.
+    """
+    # Find valid (non-NaN) indices
+    mask = ~np.isnan(x)
+
+    # If there are fewer than 2 valid values, return the array as is (no interpolation possible)
+    if mask.sum() < 2:
+        return x
+
+    # Indices of valid (non-NaN) values
+    valid_indices = np.where(mask)[0]
+    first, last = valid_indices[0], valid_indices[-1]  # Boundaries for valid range
+
+    # Create the interpolation function based on valid indices
+    interp_func = interp1d(valid_indices, x[mask], kind='linear', bounds_error=False, fill_value="extrapolate")
+
+    # Interpolate only within the valid range (avoid extrapolation beyond valid indices)
+    x[first:last+1] = interp_func(np.arange(first, last + 1))
+
+    return x
+
 
 def append_json(file_path, new_key, new_value):
     """

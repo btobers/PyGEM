@@ -66,7 +66,7 @@ def oggm_spinup(gdir ,spinup_opt, **kwargs):
                             **kwargs);
 
 
-def main(glacno_list, mb_model='oggm'):
+def run(glacno_list, mb_model='oggm'):
     main_glac_rgi = modelsetup.selectglaciersrgitable(glac_no=glacno_list)
 
     if mb_model == 'oggm':
@@ -175,7 +175,7 @@ def main(glacno_list, mb_model='oggm'):
                                         fls=gdir_spinup.read_pickle("model_flowlines", filesuffix=f"_{mb_model}"))})
 
 
-if __name__ == "__main__":
+def main():
     # define ArgumentParser
     parser = argparse.ArgumentParser(description="perform dynamical spinup")
     # add arguments
@@ -201,4 +201,7 @@ if __name__ == "__main__":
         raise ValueError('Need to specify either -rgi_glac_number or -rgi_glac_number_fn')
 
     # call main
-    main(glac_no, mb_model=args.mb_model)
+    run(glac_no, mb_model=args.mb_model)
+
+if __name__ == "__main__":
+    main()    

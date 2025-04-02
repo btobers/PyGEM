@@ -41,7 +41,7 @@ from pygem import mcmc
 from pygem import class_climate
 from pygem.massbalance import PyGEMMassBalance, PyGEMMassBalance_wrapper
 #from pygem.glacierdynamics import MassRedistributionCurveModel
-from pygem.oggm_compat import single_flowline_glacier_directory, single_flowline_glacier_directory_with_calving, l3_proc, oggm_spinup, update_cfg
+from pygem.oggm_compat import single_flowline_glacier_directory, single_flowline_glacier_directory_with_calving
 import pygem.pygem_modelsetup as modelsetup
 from pygem.shop import debris, mbdata, icethickness, oib
 from pygem.utils._funcs import append_json, interp1d_fill_gaps

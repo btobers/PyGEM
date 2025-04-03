@@ -178,39 +178,10 @@ def mb_mwea_calc(gdir, modelprms, glacier_rgi_table, fls=None, t1=None, t2=None,
 
 def get_dmda(gdir, modelprms, glacier_rgi_table, fls=None, glen_a_multiplier=None, fs=None, diff_inds_map=None, bin_edges=None, bin_centers=None, debug=False):
     """
-    Run the ice thickness inversion and mass balance model to get binned annual ice thickness change
+    For a given set of model parameters, run the ice thickness inversion and mass balance model to get binned annual ice thickness change
     Convert to monthly thickness by assuming that the flux divergence is constant throughout the year
     """
     nyears = int(gdir.dates_table.shape[0]/12) # number of years from dates table
-    # perform OGGM ice thickness inversion
-    # Perform inversion based on PyGEM MB using reference directory
-    mbmod_inv = PyGEMMassBalance(gdir, modelprms, glacier_rgi_table,
-                                    fls=fls, option_areaconstant=True)
-    if not gdir.is_tidewater or not pygem_prms['setup']['include_frontalablation']:
-        # Arbitrariliy shift the MB profile up (or down) until mass balance is zero (equilibrium for inversion)
-        apparent_mb_from_any_mb(gdir, mb_years=np.arange(nyears), mb_model=mbmod_inv)
-        tasks.prepare_for_inversion(gdir)
-        tasks.mass_conservation_inversion(gdir, glen_a=cfg.PARAMS['glen_a']*glen_a_multiplier, fs=fs)
-    # Tidewater glaciers
-    else:
-        cfg.PARAMS['use_kcalving_for_inversion'] = True
-        cfg.PARAMS['use_kcalving_for_run'] = True
-        tasks.find_inversion_calving_from_any_mb(gdir, mb_model=mbmod_inv, mb_years=np.arange(nyears),
-                                                            glen_a=cfg.PARAMS['glen_a']*glen_a_multiplier, fs=fs)
-        
-    tasks.init_present_time_glacier(gdir) # adds bins below
-    if pygem_prms['mb']['include_debris']:
-        debris.debris_binned(gdir, fl_str='model_flowlines')    # add debris enhancement factors to flowlines
-    try:
-        nfls = gdir.read_pickle('model_flowlines')
-    except FileNotFoundError as e:
-        if 'model_flowlines.pkl' in str(e):
-            tasks.compute_downstream_line(gdir)
-            tasks.compute_downstream_bedshape(gdir)
-            tasks.init_present_time_glacier(gdir) # adds bins below
-            nfls = gdir.read_pickle('model_flowlines')
-        else:
-            raise
 
     # Check that water level is within given bounds
     cls = gdir.read_pickle('inversion_input')[-1]
@@ -219,10 +190,10 @@ def get_dmda(gdir, modelprms, glacier_rgi_table, fls=None, glen_a_multiplier=Non
     water_level = utils.clip_scalar(0, th - vmax, th - vmin) 
     # mass balance model with evolving area
     mbmod = PyGEMMassBalance(gdir, modelprms, glacier_rgi_table,
-                                fls=nfls, option_areaconstant=False)
+                                fls=fls, option_areaconstant=False)
     
     # glacier dynamics model
-    ev_model = FluxBasedModel(nfls, y0=0, mb_model=mbmod, 
+    ev_model = FluxBasedModel(fls, y0=0, mb_model=mbmod, 
                                 glen_a=cfg.PARAMS['glen_a']*glen_a_multiplier, fs=fs,
                                 is_tidewater=gdir.is_tidewater,
                                 water_level=water_level)
@@ -243,8 +214,8 @@ def get_dmda(gdir, modelprms, glacier_rgi_table, fls=None, glen_a_multiplier=Non
         fl_widths_m = getattr(ev_model.fls[0], 'widths_m', None)
         fl_section = getattr(ev_model.fls[0],'section',None)
     else:
-        fl_widths_m = getattr(nfls[0], 'widths_m', None)
-        fl_section = getattr(nfls[0],'section',None)
+        fl_widths_m = getattr(fls[0], 'widths_m', None)
+        fl_section = getattr(fls[0],'section',None)
     if fl_section is not None and fl_widths_m is not None:                                
         # thickness
         icethickness_t0 = np.zeros(fl_section.shape)
@@ -289,7 +260,7 @@ def get_dmda(gdir, modelprms, glacier_rgi_table, fls=None, glen_a_multiplier=Non
     # aggregate model bin thicknesses as desired
     with warnings.catch_warnings():
         warnings.filterwarnings('ignore')
-        m_monthly_spec = np.column_stack([stats.binned_statistic(x=nfls[0].surface_h, values=x, statistic=np.nanmean, bins=bin_edges)[0] for x in m_monthly_spec.T])
+        m_monthly_spec = np.column_stack([stats.binned_statistic(x=fls[0].surface_h, values=x, statistic=np.nanmean, bins=bin_edges)[0] for x in m_monthly_spec.T])
 
     # interpolate over any empty bins
     m_monthly_spec_ = np.column_stack([
@@ -616,6 +587,7 @@ def run(list_packed_vars):
 
         # ===== Load glacier data: area (km2), ice thickness (m), width (km) =====        
         try:
+        # for f in ['b']:
             if not glacier_rgi_table['TermType'] in [1,5] or not pygem_prms['setup']['include_frontalablation']:
                 gdir = single_flowline_glacier_directory(glacier_str)
                 gdir.is_tidewater = False
@@ -749,11 +721,9 @@ def run(list_packed_vars):
                     # spinup
                     if args.spinup:
                         try:
-                            fmd_dynamic = flowline.FileModel(gdir.get_filepath('model_geometry', filesuffix='_dynamic_spinup_pygem'))
-                            fmd_dynamic.run_until(2000)
-                            fls = fmd_dynamic.fls
+                            fls = gdir.read_pickle("model_flowlines", filesuffix=f"_dynamic_spinup_wpygem_yr2000")
                         except:
-                            raise FileNotFoundError('Dynamic spinup model not found')
+                            raise FileNotFoundError('Dynamic spinup model flowlines not found')
                             
             except Exception as err:
                 fls = None  # set fls to None as to not proceed with calibration

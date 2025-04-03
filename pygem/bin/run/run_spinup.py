@@ -34,6 +34,9 @@ def l3_proc(gdir, spinup_opt, **kwargs):
     # glacier bed inversion
     workflow.execute_entity_task(tasks.apparent_mb_from_any_mb, gdir, **kwargs)
 
+    # add debris back to inversion_flowlines after inversion
+    debris.debris_binned(gdir, fl_str='inversion_flowlines')
+    
     workflow.calibrate_inversion_from_consensus(
         gdir,
         apply_fs_on_mismatch=True,
@@ -43,11 +46,14 @@ def l3_proc(gdir, spinup_opt, **kwargs):
         volume_m3_reference=None,  # here you could provide your own total volume estimate in m3
     )
 
-    # after inversion, merge data from preprocessing tasks form mode_flowlines
+    # after inversion, merge data from preprocessing tasks form model_flowlines
     workflow.execute_entity_task(tasks.init_present_time_glacier, gdir)
 
+    # add debris to model_flowlines
+    debris.debris_binned(gdir, fl_str="model_flowlines")
+
     # copy model_flowlines to model_flowlines_{spinup_opt}
-    shutil.copy(gdir.get_filepath('model_flowlines'), gdir.get_filepath('model_flowlines', filesuffix=f"_{spinup_opt}"))
+    shutil.copy(gdir.get_filepath('model_flowlines'), gdir.get_filepath('model_flowlines', filesuffix=f"_w{spinup_opt}"))
 
 
 def oggm_spinup(gdir ,spinup_opt, **kwargs):
@@ -58,12 +64,18 @@ def oggm_spinup(gdir ,spinup_opt, **kwargs):
                             minimise_for='area',  # what target to match at the RGI date
                             target_yr=2000, # The year at which we want to match area or volume. If None, gdir.rgi_date + 1 is used (the default)
                             ye=2020,  # When the simulation should stop
-                            model_flowline_filesuffix=f"_{spinup_opt}",  # The suffix of the model file to start from
-                            output_filesuffix=f"_dynamic_spinup_{spinup_opt}",
+                            model_flowline_filesuffix=f"_w{spinup_opt}",  # The suffix of the model file to start from
+                            output_filesuffix=f"_dynamic_spinup_w{spinup_opt}",
                             store_fl_diagnostics=True,
                             store_model_geometry=True,
                             # first_guess_t_spinup = , could be passed as input argument for each step in the sampler based on prior tbias, current default first guess is -2
                             **kwargs);
+
+    # store model flowlines at year 2000 - add debris back to flowlines
+    fmd_dynamic = flowline.FileModel(gdir.get_filepath("model_geometry", filesuffix=f"_dynamic_spinup_w{spinup_opt}"));
+    fmd_dynamic.run_until(2000);
+    gdir.write_pickle(fmd_dynamic.fls, "model_flowlines", filesuffix=f"_dynamic_spinup_w{spinup_opt}_yr2000");
+    debris.debris_binned(gdir, fl_str="model_flowlines", filesuffix=f"_dynamic_spinup_w{spinup_opt}_yr2000");
 
 
 def run(glacno_list, mb_model='oggm'):
@@ -152,9 +164,9 @@ def run(glacno_list, mb_model='oggm'):
                                 'tsnow_threshold': pygem_prms['sim']['params']['tsnow_threshold']}
                 
             # update cfg.PARAMS
-            update_cfg({"continue_on_error" : True}, "PARAMS")
-            
-            # add debris to model_flowlines
+            update_cfg({"continue_on_error" : False}, "PARAMS")
+
+            # add debris to inversion_flowlines
             debris.debris_binned(gdir_spinup, fl_str='inversion_flowlines')
 
             # do bed inversion
@@ -163,16 +175,13 @@ def run(glacno_list, mb_model='oggm'):
                                             modelprms=modelprms_spinup, 
                                             glacier_rgi_table=glacier_rgi_table, 
                                             fls=gdir_spinup.read_pickle('inversion_flowlines'))})
-            
-            # add debris to model_flowlines
-            debris.debris_binned(gdir_spinup, fl_str=f"model_flowlines_{mb_model}")
 
             # do spinup
             oggm_spinup(gdir_spinup, mb_model,
                             **{'mb_model_historical' : PyGEMMassBalance_wrapper(gdir=gdir_spinup, 
                                         modelprms=modelprms_spinup, 
                                         glacier_rgi_table=glacier_rgi_table, 
-                                        fls=gdir_spinup.read_pickle("model_flowlines", filesuffix=f"_{mb_model}"))})
+                                        fls=gdir_spinup.read_pickle("model_flowlines", filesuffix=f"_w{mb_model}"))})
 
 
 def main():

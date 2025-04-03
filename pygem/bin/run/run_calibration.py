@@ -748,9 +748,12 @@ def run(list_packed_vars):
 
                     # spinup
                     if args.spinup:
-                        fmd_dynamic = flowline.FileModel(gdir.get_filepath('model_geometry', filesuffix='_dynamic_spinup_pygem'))
-                        fmd_dynamic.run_until(2000)
-                        fls = fmd_dynamic.fls
+                        try:
+                            fmd_dynamic = flowline.FileModel(gdir.get_filepath('model_geometry', filesuffix='_dynamic_spinup_pygem'))
+                            fmd_dynamic.run_until(2000)
+                            fls = fmd_dynamic.fls
+                        except:
+                            raise FileNotFoundError('Dynamic spinup model not found')
                             
             except Exception as err:
                 fls = None  # set fls to None as to not proceed with calibration

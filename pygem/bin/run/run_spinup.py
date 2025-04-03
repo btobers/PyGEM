@@ -86,7 +86,7 @@ def run(glacno_list, mb_model='oggm'):
                 gdir_spinup.is_tidewater = True
 
             # update cfg.PARAMS
-            update_cfg({"continue_on_error" : False}, "PARAMS")
+            update_cfg({"continue_on_error" : True}, "PARAMS")
 
             # do bed inversion
             l3_proc(gdir_spinup, mb_model)
@@ -152,7 +152,7 @@ def run(glacno_list, mb_model='oggm'):
                                 'tsnow_threshold': pygem_prms['sim']['params']['tsnow_threshold']}
                 
             # update cfg.PARAMS
-            update_cfg({"continue_on_error" : False}, "PARAMS")
+            update_cfg({"continue_on_error" : True}, "PARAMS")
             
             # add debris to model_flowlines
             debris.debris_binned(gdir_spinup, fl_str='inversion_flowlines')

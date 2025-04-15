@@ -724,6 +724,9 @@ def run(list_packed_vars):
                             fls = gdir.read_pickle("model_flowlines", filesuffix=f"_dynamic_spinup_wpygem_yr2000")
                         except:
                             raise FileNotFoundError('Dynamic spinup model flowlines not found')
+
+                    else:
+                        fls = gdir.read_pickle("model_flowlines")
                             
             except Exception as err:
                 fls = None  # set fls to None as to not proceed with calibration

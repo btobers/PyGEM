@@ -57,30 +57,33 @@ def l3_proc(gdir, spinup_opt, **kwargs):
 
 
 def oggm_spinup(gdir ,spinup_opt, **kwargs):
+    # get target year
+    target_yr = kwargs.get('target_yr', gdir.rgi_date+1 )
+    kwargs.pop('target_yr', None)
+
     # perform OGGM dynamic spinup
     workflow.execute_entity_task(tasks.run_dynamic_spinup,
                             gdir,
-                            spinup_start_yr=1979,  # When to start the spinup
+                            # spinup_start_yr=,  # When to start the spinup
                             minimise_for='area',  # what target to match at the RGI date
-                            target_yr=2000, # The year at which we want to match area or volume. If None, gdir.rgi_date + 1 is used (the default)
-                            ye=2020,  # When the simulation should stop
+                            target_yr=target_yr, # The year at which we want to match area or volume. If None, gdir.rgi_date + 1 is used (the default)
+                            # ye=,  # When the simulation should stop
                             model_flowline_filesuffix=f"_w{spinup_opt}",  # The suffix of the model file to start from
                             output_filesuffix=f"_dynamic_spinup_w{spinup_opt}",
                             store_fl_diagnostics=True,
                             store_model_geometry=True,
                             # first_guess_t_spinup = , could be passed as input argument for each step in the sampler based on prior tbias, current default first guess is -2
                             **kwargs);
-
-    # store model flowlines at year 2000 - add debris back to flowlines
+    # store model flowlines at year kwargs['target_yr'] - add debris back to flowlines
     fmd_dynamic = flowline.FileModel(gdir.get_filepath("model_geometry", filesuffix=f"_dynamic_spinup_w{spinup_opt}"));
-    fmd_dynamic.run_until(2000);
-    gdir.write_pickle(fmd_dynamic.fls, "model_flowlines", filesuffix=f"_dynamic_spinup_w{spinup_opt}_yr2000");
-    debris.debris_binned(gdir, fl_str="model_flowlines", filesuffix=f"_dynamic_spinup_w{spinup_opt}_yr2000");
+    fmd_dynamic.run_until(target_yr);
+    gdir.write_pickle(fmd_dynamic.fls, "model_flowlines");
+    debris.debris_binned(gdir, fl_str="model_flowlines");
+    shutil.copy(gdir.get_filepath('model_flowlines'), gdir.get_filepath('model_flowlines', filesuffix=f"_dynamic_spinup_w{spinup_opt}_yr{target_yr}"));
 
 
-def run(glacno_list, mb_model='oggm'):
+def run(glacno_list, mb_model='oggm', reset_gdir=False, do_spinup=True, **kwargs):
     main_glac_rgi = modelsetup.selectglaciersrgitable(glac_no=glacno_list)
-
     if mb_model == 'oggm':
 
         for glac in range(main_glac_rgi.shape[0]):
@@ -90,11 +93,11 @@ def run(glacno_list, mb_model='oggm'):
             glacier_str = '{0:0.5f}'.format(glacier_rgi_table['RGIId_float'])
 
             if not glacier_rgi_table['TermType'] in [1,5] or not pygem_prms['setup']['include_frontalablation']:
-                gdir_spinup = single_flowline_glacier_directory(glacier_str, reset=True)
+                gdir_spinup = single_flowline_glacier_directory(glacier_str, reset=reset_gdir)
                 gdir_spinup.is_tidewater = False
             else:
                 # set reset=True to overwrite non-calving directory that may already exist
-                gdir_spinup = single_flowline_glacier_directory_with_calving(glacier_str, reset=True)
+                gdir_spinup = single_flowline_glacier_directory_with_calving(glacier_str, reset=reset_gdir)
                 gdir_spinup.is_tidewater = True
 
             # update cfg.PARAMS
@@ -102,14 +105,14 @@ def run(glacno_list, mb_model='oggm'):
 
             # do bed inversion
             l3_proc(gdir_spinup, mb_model)
-            
-            # do spinup
-            oggm_spinup(gdir_spinup, mb_model)
+            if do_spinup:
+                # do spinup
+                oggm_spinup(gdir_spinup, mb_model, **kwargs)
     
     elif mb_model == 'pygem':
 
-        gcm_name = pygem_prms['climate']['gcm_name']
-        dt_spinup = modelsetup.datesmodelrun(startyear=1979, endyear=2019)
+        dt_spinup = modelsetup.datesmodelrun(startyear=kwargs.get('spinup_start_yr',1979), endyear=kwargs.get('ye',2000)-1)
+        gcm_name = 'ERA5'
         gcm_spinup = class_climate.GCM(name=gcm_name)
 
         main_glac_rgi = modelsetup.selectglaciersrgitable(glac_no=glacno_list)
@@ -134,13 +137,13 @@ def run(glacno_list, mb_model='oggm'):
             glacier_str = '{0:0.5f}'.format(glacier_rgi_table['RGIId_float'])
 
             if not glacier_rgi_table['TermType'] in [1,5] or not pygem_prms['setup']['include_frontalablation']:
-                gdir_spinup = single_flowline_glacier_directory(glacier_str, reset=True)
+                gdir_spinup = single_flowline_glacier_directory(glacier_str, reset=reset_gdir)
                 gdir_spinup.is_tidewater = False
             else:
                 # set reset=True to overwrite non-calving directory that may already exist
-                gdir_spinup = single_flowline_glacier_directory_with_calving(glacier_str, reset=True)
+                gdir_spinup = single_flowline_glacier_directory_with_calving(glacier_str, reset=reset_gdir)
                 gdir_spinup.is_tidewater = True
-            
+
             # Add climate data to glacier directory
             gdir_spinup.historical_climate = {'elev': gcm_elev_spinup[glac],
                                     'temp': gcm_temp_spinup[glac,:],
@@ -150,7 +153,6 @@ def run(glacno_list, mb_model='oggm'):
             gdir_spinup.dates_table = dt_spinup
 
             # get modelprms from regional priors
-
             priors_df = pd.read_csv(pygem_prms['root'] + '/Output/calibration/' + pygem_prms['calib']['priors_reg_fn'])
             priors_idx = np.where((priors_df.O1Region == glacier_rgi_table['O1Region']) & 
                                                         (priors_df.O2Region == glacier_rgi_table['O2Region']))[0][0]
@@ -165,23 +167,26 @@ def run(glacno_list, mb_model='oggm'):
                 
             # update cfg.PARAMS
             update_cfg({"continue_on_error" : False}, "PARAMS")
-
+            update_cfg({"store_model_geometry" : True}, "PARAMS")
             # add debris to inversion_flowlines
             debris.debris_binned(gdir_spinup, fl_str='inversion_flowlines')
 
             # do bed inversion
             l3_proc(gdir_spinup, mb_model,
-                    **{'mb_model': PyGEMMassBalance_wrapper(gdir=gdir_spinup, 
-                                            modelprms=modelprms_spinup, 
-                                            glacier_rgi_table=glacier_rgi_table, 
-                                            fls=gdir_spinup.read_pickle('inversion_flowlines'))})
-
-            # do spinup
-            oggm_spinup(gdir_spinup, mb_model,
-                            **{'mb_model_historical' : PyGEMMassBalance_wrapper(gdir=gdir_spinup, 
+                    **{
+                        'mb_model': PyGEMMassBalance_wrapper(gdir=gdir_spinup, 
                                         modelprms=modelprms_spinup, 
                                         glacier_rgi_table=glacier_rgi_table, 
-                                        fls=gdir_spinup.read_pickle("model_flowlines", filesuffix=f"_w{mb_model}"))})
+                                        fls=gdir_spinup.read_pickle('inversion_flowlines')),})
+
+            if do_spinup:
+                # do spinup
+                oggm_spinup(gdir_spinup, mb_model,
+                                **{**{'mb_model_historical' : PyGEMMassBalance_wrapper(gdir=gdir_spinup, 
+                                            modelprms=modelprms_spinup, 
+                                            glacier_rgi_table=glacier_rgi_table, 
+                                            fls=gdir_spinup.read_pickle("model_flowlines", filesuffix=f"_w{mb_model}"))},
+                                **kwargs})
 
 
 def main():
@@ -194,6 +199,13 @@ def main():
                         help='filepath containing list of rgi_glac_number, helpful for running batches on spc'),
     parser.add_argument('-mb_model', type=str, choices=['oggm', 'pygem'], default='oggm',
                         help='mass balance model to use during inversion and spinup ["oggm" or "pygem"]')
+    parser.add_argument('-spinup_start_yr', type=int, default=1979)
+    parser.add_argument('-target_yr', type=int, default=2000)
+    parser.add_argument('-ye', type=int, default=2020)
+    parser.add_argument('-no_spinup', action='store_true', default=False,
+                        help='Skip dynamical spinup?')
+    parser.add_argument('-reset_gdir', action='store_true', default=False,
+                        help='Reset oggm galcier directory?')
     args = parser.parse_args()
     
     # RGI glacier number
@@ -208,9 +220,8 @@ def main():
             glac_no = json.load(f)
     if glac_no is None:
         raise ValueError('Need to specify either -rgi_glac_number or -rgi_glac_number_fn')
-
     # call main
-    run(glac_no, mb_model=args.mb_model)
+    run(glac_no, mb_model=args.mb_model, spinup_start_yr=args.spinup_start_yr, target_yr=args.target_yr, ye=args.ye, reset_gdir=args.reset_gdir, do_spinup=not args.no_spinup)
 
 if __name__ == "__main__":
     main()    

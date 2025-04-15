@@ -29,6 +29,7 @@ class PyGEMMassBalance(MassBalanceModel):
                  debug=pygem_prms['debug']['mb'], debug_refreeze=pygem_prms['debug']['refreeze'],
                  fls=None, fl_id=0,
                  heights=None, repeat_period=False,
+                 inversion_filter=False,
                  ignore_debris=False
                        ):
         """ Initialize.
@@ -57,6 +58,7 @@ class PyGEMMassBalance(MassBalanceModel):
         super(PyGEMMassBalance, self).__init__()
         self.valid_bounds = [-1e4, 2e4]  # in m
         self.hemisphere = gdir.hemisphere
+        self.inversion_filter = inversion_filter
 
         # Glacier data
         self.modelprms = modelprms
@@ -74,8 +76,6 @@ class PyGEMMassBalance(MassBalanceModel):
                 self.debris_ed = np.ones(self.glacier_area_initial.shape[0])
         else:
             self.debris_ed = np.ones(self.glacier_area_initial.shape[0])
-
-        self.glac_idx_initial = self.glacier_area_initial.nonzero()
 
         # Climate data
         self.dates_table = gdir.dates_table
@@ -198,7 +198,6 @@ class PyGEMMassBalance(MassBalanceModel):
             year = year % (pygem_prms['climate']['gcm_endyear'] - pygem_prms['climate']['gcm_startyear'])
 
         fl = fls[fl_id]
-        # print(fl.widths_m.shape)
 
         np.testing.assert_allclose(heights, fl.surface_h)
         glacier_area_t0 = fl.widths_m * fl.dx_meter
@@ -623,7 +622,8 @@ class PyGEMMassBalance(MassBalanceModel):
         seconds_in_year = self.dayspermonth[12*year:12*(year+1)].sum() * 24 * 3600
         mb = (self.glac_bin_massbalclim[:,12*year:12*(year+1)].sum(1)
               * pygem_prms['constants']['density_water'] / pygem_prms['constants']['density_ice'] / seconds_in_year)
-
+        if self.inversion_filter:
+            mb = np.minimum.accumulate(mb)
         # Fill in non-glaciated areas - needed for OGGM dynamics to remove small ice flux into next bin
         mb_filled = mb.copy()
         if len(glac_idx_t0) > 3:

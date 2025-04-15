@@ -427,6 +427,8 @@ def run(list_packed_vars):
                 # Load model parameters
                 if args.option_calibration:
                     modelprms_fp = args.modelprms_fp
+                    if os.path.isdir(modelprms_fp):
+                        modelprms_fp = modelprms_fp + '/' + glacier_str + '-modelprms_dict.json'
                     if not modelprms_fp:                    
                         modelprms_fn = glacier_str + '-modelprms_dict.json'
                         modelprms_fp = (pygem_prms['root'] + '/Output/calibration/' + glacier_str.split('.')[0].zfill(2) 

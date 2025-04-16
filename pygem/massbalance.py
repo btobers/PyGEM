@@ -53,17 +53,17 @@ class PyGEMMassBalance(MassBalanceModel):
         """
         if debug:
             print('\n\nDEBUGGING MASS BALANCE FUNCTION\n\n')
-        self.debug_refreeze = debug_refreeze
+        self.debug_refreeze = int(debug_refreeze)
 
         super(PyGEMMassBalance, self).__init__()
         self.valid_bounds = [-1e4, 2e4]  # in m
         self.hemisphere = gdir.hemisphere
-        self.inversion_filter = inversion_filter
+        self.inversion_filter = int(inversion_filter)
 
         # Glacier data
         self.modelprms = modelprms
         self.glacier_rgi_table = glacier_rgi_table
-        self.is_tidewater = gdir.is_tidewater
+        self.is_tidewater = int(gdir.is_tidewater)
         self.icethickness_initial = getattr(fls[fl_id], 'thick', None)
         self.width_initial = fls[fl_id].widths_m
         self.glacier_area_initial = fls[fl_id].widths_m * fls[fl_id].dx_meter
@@ -92,7 +92,7 @@ class PyGEMMassBalance(MassBalanceModel):
             self.glacier_gcm_lrgcm = self.glacier_gcm_lrgcm[::-1]
             self.glacier_gcm_lrglac = self.glacier_gcm_lrglac[::-1]
 
-        self.repeat_period = repeat_period
+        self.repeat_period = int(repeat_period)
 
         # Variables to store (consider storing in xarray)
         nbins = self.glacier_area_initial.shape[0]
@@ -220,6 +220,7 @@ class PyGEMMassBalance(MassBalanceModel):
         
         # Glacier indices
         glac_idx_t0 = glacier_area_t0.nonzero()[0]
+        # glac_idx_t0 = np.arange(len(glacier_area_t0))
         
         nbins = heights.shape[0]
         nmonths = self.glacier_gcm_temp.shape[0]
@@ -1027,7 +1028,7 @@ class PyGEMMassBalance_wrapper(MassBalanceModel):
         self.glacier_rgi_table = glacier_rgi_table
         self.fls = fls
         self.hemisphere=gdir.hemisphere
-        self.spinup_startyr=self.gdir.dates_table.year.values[0]
+        self.y0=self.gdir.dates_table.year.values[0]
 
     @property
     def mbmod(self):
@@ -1042,7 +1043,7 @@ class PyGEMMassBalance_wrapper(MassBalanceModel):
 
         return self.mbmod.get_annual_mb(
             heights=heights,
-            year=year%self.spinup_startyr,
+            year=year%self.y0,
             fls=fls,
             fl_id=fl_id,
             debug=True,

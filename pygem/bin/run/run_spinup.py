@@ -93,42 +93,49 @@ def run(glacno_list, mb_model='oggm', reset_gdir=False, do_spinup=True, **kwargs
             glacier_str = '{0:0.5f}'.format(glacier_rgi_table['RGIId_float'])
 
             if not glacier_rgi_table['TermType'] in [1,5] or not pygem_prms['setup']['include_frontalablation']:
-                gdir_spinup = single_flowline_glacier_directory(glacier_str, reset=reset_gdir)
-                gdir_spinup.is_tidewater = False
+                gdir = single_flowline_glacier_directory(glacier_str, reset=reset_gdir)
+                gdir.is_tidewater = False
             else:
                 # set reset=True to overwrite non-calving directory that may already exist
-                gdir_spinup = single_flowline_glacier_directory_with_calving(glacier_str, reset=reset_gdir)
-                gdir_spinup.is_tidewater = True
+                gdir = single_flowline_glacier_directory_with_calving(glacier_str, reset=reset_gdir)
+                gdir.is_tidewater = True
 
             # update cfg.PARAMS
             update_cfg({"continue_on_error" : True}, "PARAMS")
 
             # do bed inversion
-            l3_proc(gdir_spinup, mb_model)
+            l3_proc(gdir, mb_model)
             if do_spinup:
                 # do spinup
-                oggm_spinup(gdir_spinup, mb_model, **kwargs)
+                oggm_spinup(gdir, mb_model, **kwargs)
     
     elif mb_model == 'pygem':
 
+        dt_inv = modelsetup.datesmodelrun(startyear=2000, endyear=2019)
         dt_spinup = modelsetup.datesmodelrun(startyear=kwargs.get('spinup_start_yr',1979), endyear=kwargs.get('ye',2000)-1)
         gcm_name = 'ERA5'
-        gcm_spinup = class_climate.GCM(name=gcm_name)
+        gcm = class_climate.GCM(name=gcm_name)
 
         main_glac_rgi = modelsetup.selectglaciersrgitable(glac_no=glacno_list)
         # Air temperature [degC]
-        gcm_temp_spinup, gcm_dates_spinup = gcm_spinup.importGCMvarnearestneighbor_xarray(gcm_spinup.temp_fn, gcm_spinup.temp_vn, main_glac_rgi, dt_spinup)
+        gcm_temp_inv, _ = gcm.importGCMvarnearestneighbor_xarray(gcm.temp_fn, gcm.temp_vn, main_glac_rgi, dt_inv)
+        gcm_temp_spinup, _ = gcm.importGCMvarnearestneighbor_xarray(gcm.temp_fn, gcm.temp_vn, main_glac_rgi, dt_spinup)
         if pygem_prms['mb']['option_ablation'] == 2 and gcm_name in ['ERA5']:
-            gcm_tempstd_spinup, gcm_dates_spinup = gcm_spinup.importGCMvarnearestneighbor_xarray(gcm_spinup.tempstd_fn, gcm_spinup.tempstd_vn,
+            gcm_tempstd_inv, _ = gcm.importGCMvarnearestneighbor_xarray(gcm.tempstd_fn, gcm.tempstd_vn,
+                                                                            main_glac_rgi, dt_inv)
+            gcm_tempstd_spinup, _ = gcm.importGCMvarnearestneighbor_xarray(gcm.tempstd_fn, gcm.tempstd_vn,
                                                                             main_glac_rgi, dt_spinup)
         else:
+            gcm_tempstd_inv = np.zeros(gcm_temp_inv.shape)
             gcm_tempstd_spinup = np.zeros(gcm_temp_spinup.shape)
         # Precipitation [m]
-        gcm_prec_spinup, gcm_dates_spinup = gcm_spinup.importGCMvarnearestneighbor_xarray(gcm_spinup.prec_fn, gcm_spinup.prec_vn, main_glac_rgi, dt_spinup)
+        gcm_prec_inv, _ = gcm.importGCMvarnearestneighbor_xarray(gcm.prec_fn, gcm.prec_vn, main_glac_rgi, dt_inv)
+        gcm_prec_spinup, _ = gcm.importGCMvarnearestneighbor_xarray(gcm.prec_fn, gcm.prec_vn, main_glac_rgi, dt_spinup)
         # Elevation [m asl]
-        gcm_elev_spinup = gcm_spinup.importGCMfxnearestneighbor_xarray(gcm_spinup.elev_fn, gcm_spinup.elev_vn, main_glac_rgi)
+        gcm_elev = gcm.importGCMfxnearestneighbor_xarray(gcm.elev_fn, gcm.elev_vn, main_glac_rgi)
         # Lapse rate [degC m-1]
-        gcm_lr_spinup, gcm_dates_spinup = gcm_spinup.importGCMvarnearestneighbor_xarray(gcm_spinup.lr_fn, gcm_spinup.lr_vn, main_glac_rgi, dt_spinup)
+        gcm_lr_inv, _ = gcm.importGCMvarnearestneighbor_xarray(gcm.lr_fn, gcm.lr_vn, main_glac_rgi, dt_inv)
+        gcm_lr_spinup, _ = gcm.importGCMvarnearestneighbor_xarray(gcm.lr_fn, gcm.lr_vn, main_glac_rgi, dt_spinup)
 
         for glac in range(main_glac_rgi.shape[0]):
 
@@ -137,20 +144,20 @@ def run(glacno_list, mb_model='oggm', reset_gdir=False, do_spinup=True, **kwargs
             glacier_str = '{0:0.5f}'.format(glacier_rgi_table['RGIId_float'])
 
             if not glacier_rgi_table['TermType'] in [1,5] or not pygem_prms['setup']['include_frontalablation']:
-                gdir_spinup = single_flowline_glacier_directory(glacier_str, reset=reset_gdir)
-                gdir_spinup.is_tidewater = False
+                gdir = single_flowline_glacier_directory(glacier_str, reset=reset_gdir)
+                gdir.is_tidewater = False
             else:
                 # set reset=True to overwrite non-calving directory that may already exist
-                gdir_spinup = single_flowline_glacier_directory_with_calving(glacier_str, reset=reset_gdir)
-                gdir_spinup.is_tidewater = True
+                gdir = single_flowline_glacier_directory_with_calving(glacier_str, reset=reset_gdir)
+                gdir.is_tidewater = True
 
-            # Add climate data to glacier directory
-            gdir_spinup.historical_climate = {'elev': gcm_elev_spinup[glac],
-                                    'temp': gcm_temp_spinup[glac,:],
-                                    'tempstd': gcm_tempstd_spinup[glac,:],
-                                    'prec': gcm_prec_spinup[glac,:],
-                                    'lr': gcm_lr_spinup[glac,:]}
-            gdir_spinup.dates_table = dt_spinup
+            # Add climate data to glacier directory (first inversion data)
+            gdir.historical_climate = {'elev': gcm_elev[glac],
+                                    'temp': gcm_temp_inv[glac,:],
+                                    'tempstd': gcm_tempstd_inv[glac,:],
+                                    'prec': gcm_prec_inv[glac,:],
+                                    'lr': gcm_lr_inv[glac,:]}
+            gdir.dates_table = dt_inv
 
             # get modelprms from regional priors
             priors_df = pd.read_csv(pygem_prms['root'] + '/Output/calibration/' + pygem_prms['calib']['priors_reg_fn'])
@@ -169,23 +176,31 @@ def run(glacno_list, mb_model='oggm', reset_gdir=False, do_spinup=True, **kwargs
             update_cfg({"continue_on_error" : False}, "PARAMS")
             update_cfg({"store_model_geometry" : True}, "PARAMS")
             # add debris to inversion_flowlines
-            debris.debris_binned(gdir_spinup, fl_str='inversion_flowlines')
+            debris.debris_binned(gdir, fl_str='inversion_flowlines')
 
             # do bed inversion
-            l3_proc(gdir_spinup, mb_model,
+            l3_proc(gdir, mb_model,
                     **{
-                        'mb_model': PyGEMMassBalance_wrapper(gdir=gdir_spinup, 
+                        'mb_model': PyGEMMassBalance_wrapper(gdir=gdir, 
                                         modelprms=modelprms_spinup, 
                                         glacier_rgi_table=glacier_rgi_table, 
-                                        fls=gdir_spinup.read_pickle('inversion_flowlines')),})
+                                        fls=gdir.read_pickle('inversion_flowlines')),})
 
             if do_spinup:
+                # update historical_climate and dates_table with spinup period data
+                gdir.historical_climate = {'elev': gcm_elev[glac],
+                                        'temp': gcm_temp_spinup[glac,:],
+                                        'tempstd': gcm_tempstd_spinup[glac,:],
+                                        'prec': gcm_prec_spinup[glac,:],
+                                        'lr': gcm_lr_spinup[glac,:]}
+                gdir.dates_table = dt_spinup
+
                 # do spinup
-                oggm_spinup(gdir_spinup, mb_model,
-                                **{**{'mb_model_historical' : PyGEMMassBalance_wrapper(gdir=gdir_spinup, 
+                oggm_spinup(gdir, mb_model,
+                                **{**{'mb_model_historical' : PyGEMMassBalance_wrapper(gdir=gdir, 
                                             modelprms=modelprms_spinup, 
                                             glacier_rgi_table=glacier_rgi_table, 
-                                            fls=gdir_spinup.read_pickle("model_flowlines", filesuffix=f"_w{mb_model}"))},
+                                            fls=gdir.read_pickle("model_flowlines", filesuffix=f"_w{mb_model}"))},
                                 **kwargs})
 
 

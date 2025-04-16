@@ -22,7 +22,7 @@ pygem_prms = config.read_config()  # This reads the configuration file
 log = logging.getLogger(__name__)
 
 @entity_task(log, writes=['inversion_flowlines'])
-def dhst_binned(gdir, ignore_debris=False, fl_str='inversion_flowlines', filesuffix=''):
+def dhdt_binned(gdir, ignore_debris=False, fl_str='inversion_flowlines', filesuffix=''):
     """Bin Hugonnet et al. 20201 dhdt.
         
     Parameters

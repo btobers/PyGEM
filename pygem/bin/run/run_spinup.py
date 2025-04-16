@@ -110,32 +110,24 @@ def run(glacno_list, mb_model='oggm', reset_gdir=False, do_spinup=True, **kwargs
                 oggm_spinup(gdir, mb_model, **kwargs)
     
     elif mb_model == 'pygem':
-
-        dt_inv = modelsetup.datesmodelrun(startyear=2000, endyear=2019)
-        dt_spinup = modelsetup.datesmodelrun(startyear=kwargs.get('spinup_start_yr',1979), endyear=kwargs.get('ye',2000)-1)
+        dt = modelsetup.datesmodelrun(startyear=kwargs.get('spinup_start_yr',1979), endyear=kwargs.get('ye',2000)-1)
         gcm_name = 'ERA5'
         gcm = class_climate.GCM(name=gcm_name)
 
         main_glac_rgi = modelsetup.selectglaciersrgitable(glac_no=glacno_list)
         # Air temperature [degC]
-        gcm_temp_inv, _ = gcm.importGCMvarnearestneighbor_xarray(gcm.temp_fn, gcm.temp_vn, main_glac_rgi, dt_inv)
-        gcm_temp_spinup, _ = gcm.importGCMvarnearestneighbor_xarray(gcm.temp_fn, gcm.temp_vn, main_glac_rgi, dt_spinup)
+        gcm_temp, _ = gcm.importGCMvarnearestneighbor_xarray(gcm.temp_fn, gcm.temp_vn, main_glac_rgi, dt)
         if pygem_prms['mb']['option_ablation'] == 2 and gcm_name in ['ERA5']:
-            gcm_tempstd_inv, _ = gcm.importGCMvarnearestneighbor_xarray(gcm.tempstd_fn, gcm.tempstd_vn,
-                                                                            main_glac_rgi, dt_inv)
-            gcm_tempstd_spinup, _ = gcm.importGCMvarnearestneighbor_xarray(gcm.tempstd_fn, gcm.tempstd_vn,
-                                                                            main_glac_rgi, dt_spinup)
+            gcm_tempstd, _ = gcm.importGCMvarnearestneighbor_xarray(gcm.tempstd_fn, gcm.tempstd_vn,
+                                                                            main_glac_rgi, dt)
         else:
-            gcm_tempstd_inv = np.zeros(gcm_temp_inv.shape)
-            gcm_tempstd_spinup = np.zeros(gcm_temp_spinup.shape)
+            gcm_tempstd = np.zeros(gcm_temp.shape)
         # Precipitation [m]
-        gcm_prec_inv, _ = gcm.importGCMvarnearestneighbor_xarray(gcm.prec_fn, gcm.prec_vn, main_glac_rgi, dt_inv)
-        gcm_prec_spinup, _ = gcm.importGCMvarnearestneighbor_xarray(gcm.prec_fn, gcm.prec_vn, main_glac_rgi, dt_spinup)
+        gcm_prec, _ = gcm.importGCMvarnearestneighbor_xarray(gcm.prec_fn, gcm.prec_vn, main_glac_rgi, dt)
         # Elevation [m asl]
         gcm_elev = gcm.importGCMfxnearestneighbor_xarray(gcm.elev_fn, gcm.elev_vn, main_glac_rgi)
         # Lapse rate [degC m-1]
-        gcm_lr_inv, _ = gcm.importGCMvarnearestneighbor_xarray(gcm.lr_fn, gcm.lr_vn, main_glac_rgi, dt_inv)
-        gcm_lr_spinup, _ = gcm.importGCMvarnearestneighbor_xarray(gcm.lr_fn, gcm.lr_vn, main_glac_rgi, dt_spinup)
+        gcm_lr, _ = gcm.importGCMvarnearestneighbor_xarray(gcm.lr_fn, gcm.lr_vn, main_glac_rgi, dt)
 
         for glac in range(main_glac_rgi.shape[0]):
 
@@ -153,11 +145,11 @@ def run(glacno_list, mb_model='oggm', reset_gdir=False, do_spinup=True, **kwargs
 
             # Add climate data to glacier directory (first inversion data)
             gdir.historical_climate = {'elev': gcm_elev[glac],
-                                    'temp': gcm_temp_inv[glac,:],
-                                    'tempstd': gcm_tempstd_inv[glac,:],
-                                    'prec': gcm_prec_inv[glac,:],
-                                    'lr': gcm_lr_inv[glac,:]}
-            gdir.dates_table = dt_inv
+                                    'temp': gcm_temp[glac,:],
+                                    'tempstd': gcm_tempstd[glac,:],
+                                    'prec': gcm_prec[glac,:],
+                                    'lr': gcm_lr[glac,:]}
+            gdir.dates_table = dt
 
             # get modelprms from regional priors
             priors_df = pd.read_csv(pygem_prms['root'] + '/Output/calibration/' + pygem_prms['calib']['priors_reg_fn'])
@@ -165,7 +157,7 @@ def run(glacno_list, mb_model='oggm', reset_gdir=False, do_spinup=True, **kwargs
                                                         (priors_df.O2Region == glacier_rgi_table['O2Region']))[0][0]
             tbias_mu = float(priors_df.loc[priors_idx, 'tbias_mean'])
             kp_mu = float(priors_df.loc[priors_idx, 'kp_mean'])
-            modelprms_spinup = {'kp': kp_mu,
+            modelprms = {'kp': kp_mu,
                                 'tbias': tbias_mu,
                                 'ddfsnow': pygem_prms['calib']['MCMC_params']['ddfsnow_mu'],
                                 'ddfice': pygem_prms['calib']['MCMC_params']['ddfsnow_mu'] / pygem_prms['sim']['params']['ddfsnow_iceratio'],
@@ -182,23 +174,15 @@ def run(glacno_list, mb_model='oggm', reset_gdir=False, do_spinup=True, **kwargs
             l3_proc(gdir, mb_model,
                     **{
                         'mb_model': PyGEMMassBalance_wrapper(gdir=gdir, 
-                                        modelprms=modelprms_spinup, 
+                                        modelprms=modelprms, 
                                         glacier_rgi_table=glacier_rgi_table, 
                                         fls=gdir.read_pickle('inversion_flowlines')),})
 
             if do_spinup:
-                # update historical_climate and dates_table with spinup period data
-                gdir.historical_climate = {'elev': gcm_elev[glac],
-                                        'temp': gcm_temp_spinup[glac,:],
-                                        'tempstd': gcm_tempstd_spinup[glac,:],
-                                        'prec': gcm_prec_spinup[glac,:],
-                                        'lr': gcm_lr_spinup[glac,:]}
-                gdir.dates_table = dt_spinup
-
                 # do spinup
                 oggm_spinup(gdir, mb_model,
                                 **{**{'mb_model_historical' : PyGEMMassBalance_wrapper(gdir=gdir, 
-                                            modelprms=modelprms_spinup, 
+                                            modelprms=modelprms, 
                                             glacier_rgi_table=glacier_rgi_table, 
                                             fls=gdir.read_pickle("model_flowlines", filesuffix=f"_w{mb_model}"))},
                                 **kwargs})

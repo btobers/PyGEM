@@ -51,7 +51,7 @@ from oggm import graphics
 from oggm import tasks
 from oggm import utils
 from oggm import workflow
-from oggm.core.flowline import FluxBasedModel
+from oggm.core.flowline import FluxBasedModel, SemiImplicitModel
 from oggm.core.massbalance import apparent_mb_from_any_mb
 from oggm.core import flowline
 #from oggm.core import climate
@@ -191,16 +191,21 @@ def get_dmda(gdir, modelprms, glacier_rgi_table, fls=None, glen_a_multiplier=Non
     # mass balance model with evolving area
     mbmod = PyGEMMassBalance(gdir, modelprms, glacier_rgi_table,
                                 fls=fls, option_areaconstant=False)
-    
-    # glacier dynamics model
-    ev_model = FluxBasedModel(fls, y0=0, mb_model=mbmod, 
-                                glen_a=cfg.PARAMS['glen_a']*glen_a_multiplier, fs=fs,
-                                is_tidewater=gdir.is_tidewater,
-                                water_level=water_level)
+    # glacier dynamics model    
+    if gdir.is_tidewater:
+        ev_model = FluxBasedModel(fls, y0=0, mb_model=mbmod, 
+                                    glen_a=cfg.PARAMS['glen_a']*glen_a_multiplier, fs=fs,
+                                    is_tidewater=gdir.is_tidewater,
+                                    water_level=water_level)
+    else:
+        ev_model = SemiImplicitModel(fls, y0=0, mb_model=mbmod, 
+                                    glen_a=cfg.PARAMS['glen_a']*glen_a_multiplier, fs=fs,
+                                    is_tidewater=gdir.is_tidewater,
+                                    water_level=water_level)
     
     try:
         # run glacier dynamics model forward
-        ev_model.run_until_and_store(nyears)
+        _, ds = ev_model.run_until_and_store(nyears, fl_diag_path=True)
         with np.errstate(invalid='ignore'):
             mb_mwea = mbmod.glac_wide_massbaltotal[gdir.mbdata['t1_idx']:gdir.mbdata['t2_idx']+1].sum() / mbmod.glac_wide_area_annual[0] / nyears
 
@@ -209,26 +214,14 @@ def get_dmda(gdir, modelprms, glacier_rgi_table, fls=None, glen_a_multiplier=Non
     except RuntimeError:
         return -np.inf, -np.inf
 
-    # Update the latest thickness
-    if ev_model is not None:
-        fl_widths_m = getattr(ev_model.fls[0], 'widths_m', None)
-        fl_section = getattr(ev_model.fls[0],'section',None)
-    else:
-        fl_widths_m = getattr(fls[0], 'widths_m', None)
-        fl_section = getattr(fls[0],'section',None)
-    if fl_section is not None and fl_widths_m is not None:                                
-        # thickness
-        icethickness_t0 = np.zeros(fl_section.shape)
-        icethickness_t0[fl_widths_m > 0] = fl_section[fl_widths_m > 0] / fl_widths_m[fl_widths_m > 0]
-        mbmod.glac_bin_icethickness_annual[:,-1] = icethickness_t0
-
     ### get monthly ice thickness
     # grab components of interest
-    h_annual = mbmod.glac_bin_icethickness_annual # glacier thickness [m ice], (nbins, nyears)
+    thickness_m = ds[0].thickness_m.values.T # glacier thickness [m ice], (nbins, nyears)
 
     # set any < 0 thickness to nan
-    h_annual[h_annual <= 0] = np.nan
+    thickness_m[thickness_m<=0] = np.nan
 
+    # climatic mass balance
     dotb_monthly = mbmod.glac_bin_massbalclim # climatic mass balance [m w.e.] per month
     # convert to m ice
     dotb_monthly = dotb_monthly * (pygem_prms['constants']['density_water'] / pygem_prms['constants']['density_ice'])
@@ -236,23 +229,17 @@ def get_dmda(gdir, modelprms, glacier_rgi_table, fls=None, glen_a_multiplier=Non
     # obtain annual mass balance rate, sum monthly for each year
     dotb_annual = dotb_monthly.reshape(dotb_monthly.shape[0], dotb_monthly.shape[1]//12,-1).sum(2) # climatic mass balance [m ice a^-1]
 
-    # compute the thickness change per year
-    delta_h_annual = np.diff(h_annual, axis=1)  # [m ice a^-1] (nbins, nyears-1)
-
-    # compute flux divergence for each bin
-    flux_div_annual = dotb_annual - delta_h_annual  # [m ice a^-1]
-
     ### to get monthly thickness and mass we require monthly flux divergence ###
     # we'll assume the flux divergence is constant througohut the year (is this a good assumption?)
     # ie. take annual values and divide by 12 - use numpy repeat to repeat values across 12 months
-    flux_div_monthly = np.repeat(flux_div_annual / 12, 12, axis=-1)
+    flux_div_monthly_mmo = np.repeat(-ds[0].flux_divergence_myr.values.T[:,1:] / 12, 12, axis=-1)
 
     # get monthly binned change in thickness
-    delta_h_monthly = dotb_monthly - flux_div_monthly # [m ice per month]
+    delta_h_monthly = dotb_monthly - flux_div_monthly_mmo # [m ice per month]
 
     # get binned monthly thickness = running thickness change + initial thickness
     running_delta_h_monthly = np.cumsum(delta_h_monthly, axis=-1)
-    h_monthly =  running_delta_h_monthly + h_annual[:,0][:,np.newaxis]
+    h_monthly =  running_delta_h_monthly + thickness_m[:,0][:,np.newaxis]
 
     # convert to mass per unit area
     m_monthly_spec = h_monthly * pygem_prms['constants']['density_ice']

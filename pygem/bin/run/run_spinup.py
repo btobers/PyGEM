@@ -57,16 +57,12 @@ def l3_proc(gdir, spinup_opt, **kwargs):
 
 
 def oggm_spinup(gdir ,spinup_opt, **kwargs):
-    # get target year
-    target_yr = kwargs.get('target_yr', gdir.rgi_date+1 )
-    kwargs.pop('target_yr', None)
-
     # perform OGGM dynamic spinup
     workflow.execute_entity_task(tasks.run_dynamic_spinup,
                             gdir,
                             # spinup_start_yr=,  # When to start the spinup
                             minimise_for='area',  # what target to match at the RGI date
-                            target_yr=target_yr, # The year at which we want to match area or volume. If None, gdir.rgi_date + 1 is used (the default)
+                            # target_yr=target_yr, # The year at which we want to match area or volume. If None, gdir.rgi_date + 1 is used (the default)
                             # ye=,  # When the simulation should stop
                             model_flowline_filesuffix=f"_w{spinup_opt}",  # The suffix of the model file to start from
                             output_filesuffix=f"_dynamic_spinup_w{spinup_opt}",
@@ -74,15 +70,12 @@ def oggm_spinup(gdir ,spinup_opt, **kwargs):
                             store_model_geometry=True,
                             # first_guess_t_spinup = , could be passed as input argument for each step in the sampler based on prior tbias, current default first guess is -2
                             **kwargs);
-    # store model flowlines at year kwargs['target_yr'] - add debris back to flowlines
-    fmd_dynamic = flowline.FileModel(gdir.get_filepath("model_geometry", filesuffix=f"_dynamic_spinup_w{spinup_opt}"));
-    fmd_dynamic.run_until(target_yr);
-    gdir.write_pickle(fmd_dynamic.fls, "model_flowlines");
-    debris.debris_binned(gdir, fl_str="model_flowlines");
-    shutil.copy(gdir.get_filepath('model_flowlines'), gdir.get_filepath('model_flowlines', filesuffix=f"_dynamic_spinup_w{spinup_opt}_yr{target_yr}"));
 
 
 def run(glacno_list, mb_model='oggm', reset_gdir=False, do_spinup=True, **kwargs):
+    # remove any None-valued kwargs
+    kwargs = {k: v for k, v in kwargs.items() if v is not None}
+
     main_glac_rgi = modelsetup.selectglaciersrgitable(glac_no=glacno_list)
     if mb_model == 'oggm':
 
@@ -110,7 +103,7 @@ def run(glacno_list, mb_model='oggm', reset_gdir=False, do_spinup=True, **kwargs
                 oggm_spinup(gdir, mb_model, **kwargs)
     
     elif mb_model == 'pygem':
-        dt = modelsetup.datesmodelrun(startyear=kwargs.get('spinup_start_yr',1979), endyear=kwargs.get('ye',2000)-1)
+        dt = modelsetup.datesmodelrun(startyear=kwargs['spinup_start_yr'], endyear=kwargs['ye']-1)
         gcm_name = 'ERA5'
         gcm = class_climate.GCM(name=gcm_name)
 
@@ -199,7 +192,7 @@ def main():
     parser.add_argument('-mb_model', type=str, choices=['oggm', 'pygem'], default='oggm',
                         help='mass balance model to use during inversion and spinup ["oggm" or "pygem"]')
     parser.add_argument('-spinup_start_yr', type=int, default=1979)
-    parser.add_argument('-target_yr', type=int, default=2000)
+    parser.add_argument('-target_yr', type=int, default=None)
     parser.add_argument('-ye', type=int, default=2020)
     parser.add_argument('-no_spinup', action='store_true', default=False,
                         help='Skip dynamical spinup?')

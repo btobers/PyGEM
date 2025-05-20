@@ -53,7 +53,7 @@ def l3_proc(gdir, spinup_opt, **kwargs):
     debris.debris_binned(gdir, fl_str="model_flowlines")
 
     # copy model_flowlines to model_flowlines_{spinup_opt}
-    shutil.copy(gdir.get_filepath('model_flowlines'), gdir.get_filepath('model_flowlines', filesuffix=f"_w{spinup_opt}"))
+    shutil.copy(gdir.get_filepath('model_flowlines'), gdir.get_filepath('model_flowlines', filesuffix=f"_0_{spinup_opt}_mb"))
 
 
 def oggm_spinup(gdir ,spinup_opt, **kwargs):
@@ -64,8 +64,8 @@ def oggm_spinup(gdir ,spinup_opt, **kwargs):
                             minimise_for='area',  # what target to match at the RGI date
                             # target_yr=target_yr, # The year at which we want to match area or volume. If None, gdir.rgi_date + 1 is used (the default)
                             # ye=,  # When the simulation should stop
-                            model_flowline_filesuffix=f"_w{spinup_opt}",  # The suffix of the model file to start from
-                            output_filesuffix=f"_dynamic_spinup_w{spinup_opt}",
+                            model_flowline_filesuffix=f"_0_{spinup_opt}_mb",  # The suffix of the model file to start from
+                            output_filesuffix=f"_dynamic_spinup_{spinup_opt}_mb",
                             store_fl_diagnostics=True,
                             store_model_geometry=True,
                             # first_guess_t_spinup = , could be passed as input argument for each step in the sampler based on prior tbias, current default first guess is -2
@@ -177,7 +177,7 @@ def run(glacno_list, mb_model='oggm', reset_gdir=False, do_spinup=True, **kwargs
                                 **{**{'mb_model_historical' : PyGEMMassBalance_wrapper(gdir=gdir, 
                                             modelprms=modelprms, 
                                             glacier_rgi_table=glacier_rgi_table, 
-                                            fls=gdir.read_pickle("model_flowlines", filesuffix=f"_w{mb_model}"))},
+                                            fls=gdir.read_pickle("model_flowlines", filesuffix=f"_0_{mb_model}_mb"))},
                                 **kwargs})
 
 

@@ -190,22 +190,26 @@ def get_dmda(gdir, modelprms, glacier_rgi_table, fls=None, glen_a_multiplier=Non
     water_level = utils.clip_scalar(0, th - vmax, th - vmin) 
     # mass balance model with evolving area
     mbmod = PyGEMMassBalance(gdir, modelprms, glacier_rgi_table,
-                                fls=fls, option_areaconstant=False)
+                                fls=gdir.read_pickle("model_flowlines", filesuffix="_2000"))
     # glacier dynamics model    
     if gdir.is_tidewater:
-        ev_model = FluxBasedModel(fls, y0=0, mb_model=mbmod, 
-                                    glen_a=cfg.PARAMS['glen_a']*glen_a_multiplier, fs=fs,
-                                    is_tidewater=gdir.is_tidewater,
-                                    water_level=water_level)
+        ev_model = FluxBasedModel(gdir.read_pickle("model_flowlines", filesuffix="_2000"),
+                                y0=2000, mb_model=mbmod, 
+                                glen_a=gdir.get_diagnostics()['inversion_glen_a'],
+                                fs = gdir.get_diagnostics()['inversion_fs'],                                
+                                is_tidewater=gdir.is_tidewater,
+                                water_level=water_level)
     else:
-        ev_model = SemiImplicitModel(fls, y0=0, mb_model=mbmod, 
-                                    glen_a=cfg.PARAMS['glen_a']*glen_a_multiplier, fs=fs,
-                                    is_tidewater=gdir.is_tidewater,
-                                    water_level=water_level)
+        ev_model = flowline.SemiImplicitModel(gdir.read_pickle("model_flowlines", filesuffix="_2000"),
+                                            y0=2000, mb_model=mbmod,
+                                            glen_a=gdir.get_diagnostics()['inversion_glen_a'],
+                                            fs = gdir.get_diagnostics()['inversion_fs'],
+                                            is_tidewater=gdir.is_tidewater,
+                                            water_level=water_level)
     
     try:
         # run glacier dynamics model forward
-        _, ds = ev_model.run_until_and_store(nyears, fl_diag_path=True)
+        _, ds = ev_model.run_until_and_store(2020, fl_diag_path=True)
         with np.errstate(invalid='ignore'):
             mb_mwea = mbmod.glac_wide_massbaltotal[gdir.mbdata['t1_idx']:gdir.mbdata['t2_idx']+1].sum() / mbmod.glac_wide_area_annual[0] / nyears
 
@@ -707,8 +711,16 @@ def run(list_packed_vars):
 
                     # spinup
                     if args.spinup:
+                        # load model geometry from dynamic spinup
+                        fmd_dynamic = flowline.FileModel(gdir.get_filepath("model_geometry", filesuffix=f"_dynamic_spinup_pygem_mb"))
+                        fmd_dynamic.run_until(2000);    # get year 2000
+                        # write flowlines
+                        gdir.write_pickle(fmd_dynamic.fls, "model_flowlines", filesuffix="_2000");
+                        # add debris
+                        debris.debris_binned(gdir, fl_str="model_flowlines", filesuffix="_2000");
+
                         try:
-                            fls = gdir.read_pickle("model_flowlines", filesuffix=f"_dynamic_spinup_wpygem_yr2000")
+                            fls = gdir.read_pickle("model_flowlines", filesuffix=f"_2000")
                         except:
                             raise FileNotFoundError('Dynamic spinup model flowlines not found')
 

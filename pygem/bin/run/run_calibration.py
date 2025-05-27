@@ -44,6 +44,7 @@ from pygem.massbalance import PyGEMMassBalance, PyGEMMassBalance_wrapper
 from pygem.oggm_compat import single_flowline_glacier_directory, single_flowline_glacier_directory_with_calving
 import pygem.pygem_modelsetup as modelsetup
 from pygem.shop import debris, mbdata, icethickness, oib
+from pygem.utils.stats import mcmc_stats
 from pygem.utils._funcs import append_json, interp1d_fill_gaps
 
 from oggm import cfg
@@ -1406,7 +1407,7 @@ def run(list_packed_vars):
                             'kp':       {'type':pygem_prms['calib']['MCMC_params']['kp_disttype'], 'alpha':float(kp_gamma_alpha), 'beta':float(kp_gamma_beta), 'low':safe_float(getattr(pygem_prms,'kp_bndlow',None)), 'high':safe_float(getattr(pygem_prms,'kp_bndhigh',None))},
                             'ddfsnow':  {'type':pygem_prms['calib']['MCMC_params']['ddfsnow_disttype'], 'mu':pygem_prms['calib']['MCMC_params']['ddfsnow_mu'], 'sigma':pygem_prms['calib']['MCMC_params']['ddfsnow_sigma'] ,'low':float(pygem_prms['calib']['MCMC_params']['ddfsnow_bndlow']), 'high':float(pygem_prms['calib']['MCMC_params']['ddfsnow_bndhigh'])},
                             'rhoabl':   {'type':'normal', 'mu':900., 'sigma':17.},
-                            'rhoacc':   {'type':'normal', 'mu':600., 'sigma':60.},
+                            'rhoacc':   {'type':'normal', 'mu':600., 'sigma':60.},  # from Huss, 2013 Table 1
                             }
                 # define distributions from priors for sampling initials
                 prior_dists = get_priors(priors)
@@ -1470,9 +1471,24 @@ def run(list_packed_vars):
                                     )
                 # prepare export modelprms dictionary
                 modelprms_export = {}
+                # store model parameters and priors
+                modelprms_export['precgrad'] = [pygem_prms['sim']['params']['precgrad']]
+                modelprms_export['tsnow_threshold'] = [pygem_prms['sim']['params']['tsnow_threshold']]
+                modelprms_export['mb_obs_mwea'] = [float(mb_obs_mwea)]
+                modelprms_export['mb_obs_mwea_err'] = [float(mb_obs_mwea_err)]
+                # mcmc keys
                 ks = ['tbias','kp','ddfsnow','ddfice','mb_mwea','ar']
                 if args.oib:
-                    ks+=['dmda','rhoabl','rhoacc']
+                    modelprms_export['dmda'] = {}
+                    modelprms_export['dmda']['x'] = gdir.oib_diffs['bin_centers'].tolist()
+                    modelprms_export['dmda']['area'] = gdir.oib_diffs['bin_area'].tolist()
+                    modelprms_export['dmda']['obs'] = [ob.flatten().tolist() for ob in obs[1]]
+                    modelprms_export['dmda']['dates'] = [(dt1.strftime("%Y-%m-%d"), dt2.strftime("%Y-%m-%d")) for dt1, dt2 in gdir.oib_diffs['dates']]
+                    modelprms_export['ela'] = gdir.ela
+                    ks+=['rhoabl','rhoacc']
+                modelprms_export['priors'] = priors
+
+                # create nested dictionary for each mcmc key
                 for k in ks:
                     modelprms_export[k] = {}
                 # -------------------
@@ -1480,8 +1496,7 @@ def run(list_packed_vars):
                 # --------------------
                 # ----- run MCMC -----
                 # --------------------               
-                # try:
-                for f in ['b']:
+                try:
                     ### loop over chains, adjust initial guesses accordingly. done in a while loop as to repeat a chain up to one time if it remained stuck throughout ###
                     n_chain=0
                     repeat=False
@@ -1558,18 +1573,9 @@ def run(list_packed_vars):
                         # increment n_chain only if the current iteration was a repeat
                         n_chain += 1
 
-                    # Export model parameters
-                    modelprms_export['precgrad'] = [pygem_prms['sim']['params']['precgrad']]
-                    modelprms_export['tsnow_threshold'] = [pygem_prms['sim']['params']['tsnow_threshold']]
-                    modelprms_export['mb_obs_mwea'] = [float(mb_obs_mwea)]
-                    modelprms_export['mb_obs_mwea_err'] = [float(mb_obs_mwea_err)]
-                    modelprms_export['priors'] = priors
-                    if args.oib:
-                        modelprms_export['dmda']['x'] = gdir.oib_diffs['bin_centers'].tolist()
-                        modelprms_export['dmda']['area'] = gdir.oib_diffs['bin_area'].tolist()
-                        modelprms_export['dmda']['obs'] = [ob.flatten().tolist() for ob in obs[1]]
-                        modelprms_export['dmda']['dates'] = [(dt1.strftime("%Y-%m-%d"), dt2.strftime("%Y-%m-%d")) for dt1, dt2 in gdir.oib_diffs['dates']]
-                        modelprms_export['dmda']['ela'] = gdir.ela
+                    # compute stats on mcmc parameters
+                    modelprms_export = mcmc_stats(modelprms_export)
+
                     modelprms_fn = glacier_str + '-modelprms_dict.json'
                     modelprms_fp = [(pygem_prms['root'] + f'/Output/calibration/' + glacier_str.split('.')[0].zfill(2) 
                                     + '/')]
@@ -1600,14 +1606,14 @@ def run(list_packed_vars):
                     with open(mcmc_good_fp + txt_fn_good, "w") as text_file:
                         text_file.write(glacier_str + ' successfully exported mcmc results')
                 
-                # except Exception as err:
-                #     # MCMC LOG FAILURE
-                #     mcmc_fail_fp = pygem_prms['root'] + f'/Output/mcmc_fail{outpath_sfix}/' + glacier_str.split('.')[0].zfill(2) + '/'
-                #     if not os.path.exists(mcmc_fail_fp):
-                #         os.makedirs(mcmc_fail_fp, exist_ok=True)
-                #     txt_fn_fail = glacier_str + "-mcmc_fail.txt"
-                #     with open(mcmc_fail_fp + txt_fn_fail, "w") as text_file:
-                #         text_file.write(glacier_str + f' failed to complete MCMC: {err}')
+                except Exception as err:
+                    # MCMC LOG FAILURE
+                    mcmc_fail_fp = pygem_prms['root'] + f'/Output/mcmc_fail{outpath_sfix}/' + glacier_str.split('.')[0].zfill(2) + '/'
+                    if not os.path.exists(mcmc_fail_fp):
+                        os.makedirs(mcmc_fail_fp, exist_ok=True)
+                    txt_fn_fail = glacier_str + "-mcmc_fail.txt"
+                    with open(mcmc_fail_fp + txt_fn_fail, "w") as text_file:
+                        text_file.write(glacier_str + f' failed to complete MCMC: {err}')
                 # --------------------
 
 

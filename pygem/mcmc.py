@@ -351,52 +351,6 @@ class Metropolis:
     
 ### some other useful functions ###
 
-def effective_n(x):
-    """
-    Compute the effective sample size of a trace.
-
-    Takes the trace and computes the effective sample size
-    according to its detrended autocorrelation.
-
-    Parameters
-    ----------
-    x : list or array of chain samples
-
-    Returns
-    -------
-    effective_n : int
-        effective sample size
-    """
-    if len(set(x)) == 1:
-        return 1
-    try:
-        # detrend trace using mean to be consistent with statistics
-        # definition of autocorrelation
-        x = np.asarray(x)
-        x = (x - x.mean())
-        # compute autocorrelation (note: only need second half since
-        # they are symmetric)
-        rho = np.correlate(x, x, mode='full')
-        rho = rho[len(rho)//2:]
-        # normalize the autocorrelation values
-        #  note: rho[0] is the variance * n_samples, so this is consistent
-        #  with the statistics definition of autocorrelation on wikipedia
-        # (dividing by n_samples gives you the expected value).
-        rho_norm = rho / rho[0]
-        # Iterate until sum of consecutive estimates of autocorrelation is
-        # negative to avoid issues with the sum being -0.5, which returns an
-        # effective_n of infinity
-        negative_autocorr = False
-        t = 1
-        n = len(x)
-        while not negative_autocorr and (t < n):
-            if not t % 2:
-                negative_autocorr = sum(rho_norm[t-1:t+1]) < 0
-            t += 1
-        return int(n / (1 + 2*rho_norm[1:t].sum()))
-    except:
-        return None
-
 def plot_chain(m_primes, m_chain, mb_obs, ar, title, ms=1, fontsize=8, show=False, fpath=None):
     # Plot the trace of the parameters
     n = m_primes.shape[1]

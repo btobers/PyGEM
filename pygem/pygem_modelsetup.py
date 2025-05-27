@@ -290,6 +290,7 @@ def selectglaciersrgitable(glac_no=None, rgi_regionsO1=None, rgi_regionsO2='all'
     Output: Pandas DataFrame of the glacier statistics for each glacier in the model run
     (rows = GlacNo, columns = glacier statistics)
     """
+    print(glac_no)
     if glac_no is not None:
         glac_no_byregion = {}
         rgi_regionsO1 = [int(i.split('.')[0]) for i in glac_no]

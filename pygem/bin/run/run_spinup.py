@@ -1,7 +1,9 @@
 import sys, shutil, json
 import argparse
+import multiprocessing
 import numpy as np
 import pandas as pd
+from functools import partial
 # pygem imports
 import pygem.setup.config as config
 # check for config
@@ -107,7 +109,6 @@ def run(glacno_list, mb_model='oggm', reset_gdir=False, do_spinup=True, **kwargs
         gcm_name = 'ERA5'
         gcm = class_climate.GCM(name=gcm_name)
 
-        main_glac_rgi = modelsetup.selectglaciersrgitable(glac_no=glacno_list)
         # Air temperature [degC]
         gcm_temp, _ = gcm.importGCMvarnearestneighbor_xarray(gcm.temp_fn, gcm.temp_vn, main_glac_rgi, dt)
         if pygem_prms['mb']['option_ablation'] == 2 and gcm_name in ['ERA5']:
@@ -194,6 +195,8 @@ def main():
     parser.add_argument('-spinup_start_yr', type=int, default=1979)
     parser.add_argument('-target_yr', type=int, default=None)
     parser.add_argument('-ye', type=int, default=2020)
+    parser.add_argument('-ncores', action='store', type=int, default=1,
+                        help='number of simultaneous processes (cores) to use')
     parser.add_argument('-no_spinup', action='store_true', default=False,
                         help='Skip dynamical spinup?')
     parser.add_argument('-reset_gdir', action='store_true', default=False,
@@ -212,8 +215,22 @@ def main():
             glac_no = json.load(f)
     if glac_no is None:
         raise ValueError('Need to specify either -rgi_glac_number or -rgi_glac_number_fn')
-    # call main
-    run(glac_no, mb_model=args.mb_model, spinup_start_yr=args.spinup_start_yr, target_yr=args.target_yr, ye=args.ye, reset_gdir=args.reset_gdir, do_spinup=not args.no_spinup)
+    
+    # number of cores for parallel processing
+    if args.ncores > 1:
+        ncores = int(np.min([len(glac_no), args.ncores]))
+    else:
+        ncores = 1
+
+    # Glacier number lists to pass for parallel processing
+    glac_no_lsts = modelsetup.split_list(glac_no, n=ncores)
+
+    # set up partial function with debug argument
+    run_partial = partial(run, mb_model=args.mb_model, spinup_start_yr=args.spinup_start_yr, target_yr=args.target_yr, ye=args.ye, reset_gdir=args.reset_gdir, do_spinup=not args.no_spinup)
+    # parallel processing
+    print(f'Processing with {ncores} cores... \n{glac_no_lsts}')
+    with multiprocessing.Pool(ncores) as p:
+        p.map(run_partial, glac_no_lsts)
 
 if __name__ == "__main__":
     main()    

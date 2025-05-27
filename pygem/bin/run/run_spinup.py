@@ -159,7 +159,7 @@ def run(glacno_list, mb_model='oggm', reset_gdir=False, do_spinup=True, **kwargs
                                 'tsnow_threshold': pygem_prms['sim']['params']['tsnow_threshold']}
                 
             # update cfg.PARAMS
-            update_cfg({"continue_on_error" : False}, "PARAMS")
+            update_cfg({"continue_on_error" : True}, "PARAMS")
             update_cfg({"store_model_geometry" : True}, "PARAMS")
             # add debris to inversion_flowlines
             debris.debris_binned(gdir, fl_str='inversion_flowlines')

@@ -1006,18 +1006,20 @@ class PyGEMMassBalance(MassBalanceModel):
 
 # define PyGEM mb class wrapper to feed to OGGM
 class PyGEMMassBalance_wrapper(MassBalanceModel):
-    def __init__(self, gdir, modelprms, glacier_rgi_table,
+    def __init__(self, 
+                 gdir,
                  mb_model_class=PyGEMMassBalance,
-                 fls=None,
+                 fl_str='inversion_flowlines',
+                 filesuffix='',
                  **kwargs
                 ):
         super().__init__()
 
         self.gdir = gdir
         self.mb_model_class = partial(mb_model_class, **kwargs)
-        self.modelprms = modelprms
-        self.glacier_rgi_table = glacier_rgi_table
-        self.fls = fls
+        self.modelprms = self.gdir.modelprms
+        self.glacier_rgi_table = self.gdir.glacier_rgi_table
+        self.fls = self.gdir.read_pickle(fl_str, filesuffix=filesuffix)
         self.hemisphere=gdir.hemisphere
 
     @property

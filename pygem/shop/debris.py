@@ -7,6 +7,7 @@ Distrubted under the MIT lisence
 """
 import os
 import logging
+import warnings
 
 import numpy as np
 import rasterio
@@ -124,7 +125,7 @@ def debris_to_gdir(gdir, debris_dir=f"{pygem_prms['root']}/{pygem_prms['mb']['de
 
 
 @entity_task(log, writes=['inversion_flowlines'])
-def debris_binned(gdir, ignore_debris=False, fl_str='inversion_flowlines', filesuffix='', opt_extrapolate_below=False):
+def debris_binned(gdir, ignore_debris=False, fl_str='inversion_flowlines', filesuffix=''):
     """Bin debris thickness and melt enhancement factors.
     
     Parameters
@@ -132,18 +133,11 @@ def debris_binned(gdir, ignore_debris=False, fl_str='inversion_flowlines', files
     gdir : :py:class:`oggm.GlacierDirectory`
         where to write the data
 
-    ignore_debris : bool
-        If True, do not bin debris thickness and enhancement factors.
-    
     fl_str : str
         The name of the flowline file to read. Default is 'inversion_flowlines'.
 
     filesuffix : str
         The filesuffix to use when reading the flowline file. Default is ''.
-
-    opt_extrapolate_below : bool
-        If True, extrapolate debris thickness and enhancement factors below the glacier terminus.
-        Default is False.
     """
     # Nominal glaciers will throw error, so make sure inversion_flowlines exist
     try:
@@ -157,7 +151,7 @@ def debris_binned(gdir, ignore_debris=False, fl_str='inversion_flowlines', files
     
     if flowlines is not None:
         # Add binned debris thickness and enhancement factors to flowlines
-        if (os.path.exists(gdir.get_filepath('debris_hd'))) and (not ignore_debris):
+        if os.path.exists(gdir.get_filepath('debris_hd')):
             ds = xr.open_dataset(gdir.get_filepath('gridded_data'))
             glacier_mask = ds['glacier_mask'].values
             topo = ds['topo_smoothed'].values
@@ -185,8 +179,10 @@ def debris_binned(gdir, ignore_debris=False, fl_str='inversion_flowlines', files
                 bin_idx = np.where((topo_onglac < bin_max) & (topo_onglac >= bin_min))[0]
                 # Debris thickness and enhancement factors for on-glacier bins
                 if len(bin_idx) > 0:
-                    hd_binned[nbin] = np.nanmean(hd_onglac[bin_idx])
-                    ed_binned[nbin] = np.nanmean(ed_onglac[bin_idx])
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore", category=RuntimeWarning)
+                        hd_binned[nbin] = np.nanmean(hd_onglac[bin_idx])
+                        ed_binned[nbin] = np.nanmean(ed_onglac[bin_idx])
                     hd_terminus = hd_binned[nbin]
                     ed_terminus = ed_binned[nbin]
                 # Debris thickness and enhancement factors for bins below the present-day glacier

@@ -11,7 +11,7 @@ Model statistics module
 import numpy as np
 import arviz as az
 
-def _ess(x):
+def effective_n(x):
     """
     Compute the effective sample size of a trace.
 
@@ -109,7 +109,7 @@ def mcmc_stats(chains_dict,
         medians = np.median(samples, axis=1).tolist()
         q25 = np.quantile(samples, 0.25, axis=1).tolist()
         q75 = np.quantile(samples, 0.75, axis=1).tolist()
-        ess = [_ess(x) for x in samples]
+        ess = [effective_n(x) for x in samples]
         # Overall stats (R-hat)
         if samples.shape[0] > 1:
             # calculate the gelman-rubin stat for each variable across all chains

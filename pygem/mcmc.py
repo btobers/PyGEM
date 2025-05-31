@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 # Local libraries
 import pygem.setup.config as config
+from pygem.utils.stats import effective_n
 # Read the config
 pygem_prms = config.read_config()  # This reads the configuration file
 

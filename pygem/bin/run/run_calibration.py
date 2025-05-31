@@ -712,18 +712,10 @@ def run(list_packed_vars):
 
                     # spinup
                     if args.spinup:
-                        # load model geometry from dynamic spinup
-                        fmd_dynamic = flowline.FileModel(gdir.get_filepath("model_geometry", filesuffix=f"_dynamic_spinup_pygem_mb"))
-                        fmd_dynamic.run_until(2000);    # get year 2000
-                        # write flowlines
-                        gdir.write_pickle(fmd_dynamic.fls, "model_flowlines", filesuffix="_2000");
-                        # add debris
-                        debris.debris_binned(gdir, fl_str="model_flowlines", filesuffix="_2000");
-
                         try:
                             fls = gdir.read_pickle("model_flowlines", filesuffix=f"_2000")
                         except:
-                            raise FileNotFoundError('Dynamic spinup model flowlines not found')
+                            raise FileNotFoundError('Model flowlines from dynamic scpinup not found')
 
                     else:
                         fls = gdir.read_pickle("model_flowlines")

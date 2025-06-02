@@ -115,7 +115,7 @@ def main():
                         help='Randoph Glacier Inventory glacier number (can take multiple)')
     parser.add_argument('-rgi_glac_number_fn', action='store', type=str, default=None,
                         help='filepath containing list of rgi_glac_number, helpful for running batches on spc'),
-    parser.add_argument('-spinup_start_yr', type=int, default=1979)
+    parser.add_argument('-spinup_start_yr', type=int, default=None)
     parser.add_argument('-target_yr', type=int, default=None)
     parser.add_argument('-ye', type=int, default=None)
     parser.add_argument('-ncores', action='store', type=int, default=1,

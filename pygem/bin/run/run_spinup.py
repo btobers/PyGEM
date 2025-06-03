@@ -111,6 +111,10 @@ def main():
     # define ArgumentParser
     parser = argparse.ArgumentParser(description="perform dynamical spinup")
     # add arguments
+    parser.add_argument('-rgi_region01', type=int, default=pygem_prms['setup']['rgi_region01'],
+                        help='Randoph Glacier Inventory region (can take multiple, e.g. `-run_region01 1 2 3`)', nargs='+')
+    parser.add_argument('-rgi_region02', type=str, default=pygem_prms['setup']['rgi_region02'], nargs='+',
+                        help='Randoph Glacier Inventory subregion (either `all` or multiple spaced integers,  e.g. `-run_region02 1 2 3`)')
     parser.add_argument('-rgi_glac_number', action='store', type=float, default=pygem_prms['setup']['glac_no'], nargs='+',
                         help='Randoph Glacier Inventory glacier number (can take multiple)')
     parser.add_argument('-rgi_glac_number_fn', action='store', type=str, default=None,
@@ -132,6 +136,13 @@ def main():
     elif args.rgi_glac_number_fn is not None:
         with open(args.rgi_glac_number_fn, 'r') as f:
             glac_no = json.load(f)
+    else:
+        main_glac_rgi_all = modelsetup.selectglaciersrgitable(
+                rgi_regionsO1=args.rgi_region01, rgi_regionsO2=args.rgi_region02,
+                include_landterm=pygem_prms['setup']['include_landterm'], include_laketerm=pygem_prms['setup']['include_laketerm'],
+                include_tidewater=pygem_prms['setup']['include_tidewater'], min_glac_area_km2=pygem_prms['setup']['min_glac_area_km2'])
+        glac_no = list(main_glac_rgi_all['rgino_str'].values)
+
     if glac_no is None:
         raise ValueError('Need to specify either -rgi_glac_number or -rgi_glac_number_fn')
     

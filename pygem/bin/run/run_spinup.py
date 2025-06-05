@@ -21,12 +21,11 @@ from oggm.core import flowline
 from oggm import cfg
 
 
-def run(glacno_list, **kwargs):
+def run(glacno_list, spinup_start_yr, **kwargs):
 
     main_glac_rgi = modelsetup.selectglaciersrgitable(glac_no=glacno_list)
-    sy = kwargs.get('spinup_start_yr', 1979)
     # model dates
-    dt = modelsetup.datesmodelrun(startyear=sy, endyear=2019) # will have to cover the time period of inversion (2000-2019) and spinup (1979-~2010 by default)
+    dt = modelsetup.datesmodelrun(startyear=spinup_start_yr, endyear=2019) # will have to cover the time period of inversion (2000-2019) and spinup (1979-~2010 by default)
     # load climate data
     ref_clim = class_climate.GCM(name="ERA5")
 
@@ -84,7 +83,7 @@ def run(glacno_list, **kwargs):
         # perform OGGM dynamic spinup
         workflow.execute_entity_task(tasks.run_dynamic_spinup,
                                 gd,
-                                # spinup_start_yr=,  # When to start the spinup
+                                spinup_start_yr=spinup_start_yr,  # When to start the spinup
                                 minimise_for='area',  # what target to match at the RGI date
                                 # target_yr=target_yr, # The year at which we want to match area or volume. If None, gdir.rgi_date + 1 is used (the default)
                                 # ye=,  # When the simulation should stop
@@ -119,7 +118,7 @@ def main():
                         help='Randoph Glacier Inventory glacier number (can take multiple)')
     parser.add_argument('-rgi_glac_number_fn', action='store', type=str, default=None,
                         help='filepath containing list of rgi_glac_number, helpful for running batches on spc'),
-    parser.add_argument('-spinup_start_yr', type=int, default=None)
+    parser.add_argument('-spinup_start_yr', type=int, default=1979)
     parser.add_argument('-target_yr', type=int, default=None)
     parser.add_argument('-ye', type=int, default=None)
     parser.add_argument('-ncores', action='store', type=int, default=1,

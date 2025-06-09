@@ -151,8 +151,8 @@ def mb_mwea_calc(gdir, modelprms, glacier_rgi_table, fls=None, t1=None, t2=None,
     """
     # RUN MASS BALANCE MODEL
     mbmod = PyGEMMassBalance(gdir, modelprms, glacier_rgi_table, fls=fls, option_areaconstant=True)
-    years = np.arange(0, int(gdir.dates_table.shape[0]/12))
-    for year in years:
+    # years = np.arange(0, int(gdir.dates_table.shape[0]/12))
+    for year in gdir.dates_table.year.unique():
         mbmod.get_annual_mb(fls[0].surface_h, fls=fls, fl_id=0, year=year)
     
     # Option for must melt condition
@@ -698,32 +698,21 @@ def run(list_packed_vars):
                     # map each element in the gdir.oib_diffs['dates'] to its index in gdir.dates_table - these inds will be used to difference model results in MCMC calib
                     gdir.oib_diffs['model_inds_map'] = [(index_map[val1], index_map[val2]) for val1, val2 in gdir.oib_diffs['dates']]
 
-                    # get glen_a, as dynamics will need to be on to get thickness changes
-                    if pygem_prms['sim']['oggm_dynamics']['use_reg_glena']:
-                        glena_df = pd.read_csv(pygem_prms['root'] + pygem_prms['sim']['oggm_dynamics']['glena_reg_relpath'])                    
-                        glena_O1regions = [int(x) for x in glena_df.O1Region.values]
-                        assert glacier_rgi_table.O1Region in glena_O1regions, ' O1 region not in glena_df'
-                        glena_idx = np.where(glena_O1regions == glacier_rgi_table.O1Region)[0][0]
-                        glen_a_multiplier = glena_df.loc[glena_idx,'glens_a_multiplier']
-                        fs = glena_df.loc[glena_idx,'fs']
-                    else:
-                        fs = pygem_prms['sim']['oggm_dynamics']['fs']
-                        glen_a_multiplier = pygem_prms['sim']['oggm_dynamics']['glen_a_multiplier']
-
-                    # spinup
-                    if args.spinup:
-                        try:
-                            fls = gdir.read_pickle("model_flowlines", filesuffix=f"_2000")
-                        except:
-                            raise FileNotFoundError('Model flowlines from dynamic scpinup not found')
-
-                    else:
-                        fls = gdir.read_pickle("model_flowlines")
-                            
             except Exception as err:
                 fls = None  # set fls to None as to not proceed with calibration
                 if debug:
                     print(f'Error loading OIB data: {err}')
+        
+        # spinup
+        if args.spinup:
+            try:
+                fls = gdir.read_pickle("model_flowlines", filesuffix=f"_2000")
+            except FileNotFoundError:
+                fls=None
+                print('FileNotFoundError: Model flowlines from dynamical scpinup not found')
+
+        else:
+            fls = gdir.read_pickle("model_flowlines")   
 
         # ----- CALIBRATION OPTIONS ------
         if (fls is not None) and (gdir.mbdata is not None) and (glacier_area.sum() > 0):

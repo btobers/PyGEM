@@ -43,67 +43,72 @@ def run(glacno_list, spinup_start_yr, **kwargs):
 
     # loop through gdirs and add `glacier_rgi_table`, `historical_climate`, `dates_table` and `modelprms` attributes to each glacier directory
     for i, glaco in enumerate(glacno_list):
-        glacier_rgi_table = main_glac_rgi.loc[main_glac_rgi.index.values[i], :]
-        glacier_str = '{0:0.5f}'.format(glacier_rgi_table['RGIId_float'])
-        # instantiate glacier directory
-        if not glacier_rgi_table['TermType'] in [1,5] or not pygem_prms['setup']['include_frontalablation']:
-            gd = single_flowline_glacier_directory(glacier_str, reset=False)
-            gd.is_tidewater = False
-        else:
-            gd = single_flowline_glacier_directory_with_calving(glacier_str, reset=False)
-            gd.is_tidewater = True
+        try:
+            glacier_rgi_table = main_glac_rgi.loc[main_glac_rgi.index.values[i], :]
+            glacier_str = '{0:0.5f}'.format(glacier_rgi_table['RGIId_float'])
+            # instantiate glacier directory
+            if not glacier_rgi_table['TermType'] in [1,5] or not pygem_prms['setup']['include_frontalablation']:
+                gd = single_flowline_glacier_directory(glacier_str, reset=False)
+                gd.is_tidewater = False
+            else:
+                gd = single_flowline_glacier_directory_with_calving(glacier_str, reset=False)
+                gd.is_tidewater = True
 
-        # Select subsets of data
-        gd.glacier_rgi_table = glacier_rgi_table
-        gd.glacier_rgi_table = main_glac_rgi.loc[main_glac_rgi.index.values[i], :]
-        # Add climate data to glacier directory (first inversion data)
-        gd.historical_climate = {"elev": elev[i],
-                                "temp": temp[i,:],
-                                "tempstd": np.zeros(temp[i,:].shape),
-                                "prec": prec[i,:],
-                                "lr": lr[i,:]}
-        gd.dates_table = dt
+            # Select subsets of data
+            gd.glacier_rgi_table = glacier_rgi_table
+            gd.glacier_rgi_table = main_glac_rgi.loc[main_glac_rgi.index.values[i], :]
+            # Add climate data to glacier directory (first inversion data)
+            gd.historical_climate = {"elev": elev[i],
+                                    "temp": temp[i,:],
+                                    "tempstd": np.zeros(temp[i,:].shape),
+                                    "prec": prec[i,:],
+                                    "lr": lr[i,:]}
+            gd.dates_table = dt
 
-        # get modelprms from regional priors
-        priors_idx = np.where((priors_df.O1Region == gd.glacier_rgi_table["O1Region"]) & 
-                                                    (priors_df.O2Region == gd.glacier_rgi_table["O2Region"]))[0][0]
-        tbias_mu = float(priors_df.loc[priors_idx, "tbias_mean"])
-        kp_mu = float(priors_df.loc[priors_idx, "kp_mean"])
-        gd.modelprms = {"kp": kp_mu,
-                            "tbias": tbias_mu,
-                            "ddfsnow": pygem_prms["calib"]["MCMC_params"]["ddfsnow_mu"],
-                            "ddfice": pygem_prms["calib"]["MCMC_params"]["ddfsnow_mu"] / pygem_prms["sim"]["params"]["ddfsnow_iceratio"],
-                            "precgrad": pygem_prms["sim"]["params"]["precgrad"],
-                            "tsnow_threshold": pygem_prms["sim"]["params"]["tsnow_threshold"]}
+            # get modelprms from regional priors
+            priors_idx = np.where((priors_df.O1Region == gd.glacier_rgi_table["O1Region"]) & 
+                                                        (priors_df.O2Region == gd.glacier_rgi_table["O2Region"]))[0][0]
+            tbias_mu = float(priors_df.loc[priors_idx, "tbias_mean"])
+            kp_mu = float(priors_df.loc[priors_idx, "kp_mean"])
+            gd.modelprms = {"kp": kp_mu,
+                                "tbias": tbias_mu,
+                                "ddfsnow": pygem_prms["calib"]["MCMC_params"]["ddfsnow_mu"],
+                                "ddfice": pygem_prms["calib"]["MCMC_params"]["ddfsnow_mu"] / pygem_prms["sim"]["params"]["ddfsnow_iceratio"],
+                                "precgrad": pygem_prms["sim"]["params"]["precgrad"],
+                                "tsnow_threshold": pygem_prms["sim"]["params"]["tsnow_threshold"]}
 
-        # update cfg.PARAMS
-        update_cfg({"continue_on_error" : True}, "PARAMS")
-        update_cfg({"store_model_geometry" : True}, "PARAMS")
+            # update cfg.PARAMS
+            update_cfg({"continue_on_error" : True}, "PARAMS")
+            update_cfg({"store_model_geometry" : True}, "PARAMS")
 
-        # perform OGGM dynamic spinup
-        workflow.execute_entity_task(tasks.run_dynamic_spinup,
-                                gd,
-                                spinup_start_yr=spinup_start_yr,  # When to start the spinup
-                                minimise_for='area',  # what target to match at the RGI date
-                                # target_yr=target_yr, # The year at which we want to match area or volume. If None, gdir.rgi_date + 1 is used (the default)
-                                # ye=,  # When the simulation should stop
-                                output_filesuffix="_dynamic_spinup_pygem_mb",
-                                store_fl_diagnostics=True,
-                                store_model_geometry=True,
-                                # first_guess_t_spinup = , could be passed as input argument for each step in the sampler based on prior tbias, current default first guess is -2
-                                mb_model_historical = PyGEMMassBalance_wrapper(gd, fl_str="model_flowlines"),
-                                ignore_errors=False,
-                                **kwargs);
+            # perform OGGM dynamic spinup
+            workflow.execute_entity_task(tasks.run_dynamic_spinup,
+                                    gd,
+                                    spinup_start_yr=spinup_start_yr,  # When to start the spinup
+                                    minimise_for='area',  # what target to match at the RGI date
+                                    # target_yr=target_yr, # The year at which we want to match area or volume. If None, gdir.rgi_date + 1 is used (the default)
+                                    # ye=,  # When the simulation should stop
+                                    output_filesuffix="_dynamic_spinup_pygem_mb",
+                                    store_fl_diagnostics=True,
+                                    store_model_geometry=True,
+                                    # first_guess_t_spinup = , could be passed as input argument for each step in the sampler based on prior tbias, current default first guess is -2
+                                    mb_model_historical = PyGEMMassBalance_wrapper(gd, fl_str="model_flowlines"),
+                                    ignore_errors=False,
+                                    **kwargs);
 
-        # instantiate flowline.FileModel object from model_geometry_dynamic_spinup
-        fmd_dynamic = flowline.FileModel(gd.get_filepath("model_geometry", filesuffix=f"_dynamic_spinup_pygem_mb"))
-        # run FileModel to year 2000 (it will be initialized at `spinup_start_yr`)
-        # Bring it to year 2000
-        fmd_dynamic.run_until(2000);
-        # write flowlines
-        gd.write_pickle(fmd_dynamic.fls, "model_flowlines", filesuffix="_2000");
-        # add debris
-        debris.debris_binned(gd, fl_str="model_flowlines", filesuffix="_2000");
+            # instantiate flowline.FileModel object from model_geometry_dynamic_spinup
+            fmd_dynamic = flowline.FileModel(gd.get_filepath("model_geometry", filesuffix=f"_dynamic_spinup_pygem_mb"))
+            # run FileModel to year 2000 (it will be initialized at `spinup_start_yr`)
+            # Bring it to year 2000
+            fmd_dynamic.run_until(2000);
+            # write flowlines
+            gd.write_pickle(fmd_dynamic.fls, "model_flowlines", filesuffix="_2000");
+            # add debris
+            debris.debris_binned(gd, fl_str="model_flowlines", filesuffix="_2000");
+        except Exception as e:
+            print(f"Error processing glacier {glaco}: {e}")
+            # continue to next glacier
+            continue
 
 
 def main():

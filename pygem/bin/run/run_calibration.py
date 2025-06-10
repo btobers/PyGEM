@@ -177,7 +177,7 @@ def mb_mwea_calc(gdir, modelprms, glacier_rgi_table, fls=None, t1=None, t2=None,
         return mb_mwea
 
 
-def get_dmda(gdir, modelprms, glacier_rgi_table, fls=None, glen_a_multiplier=None, fs=None, diff_inds_map=None, bin_edges=None, bin_centers=None, debug=False):
+def get_dmda(gdir, modelprms, glacier_rgi_table, fls=None, diff_inds_map=None, bin_edges=None, bin_centers=None, debug=False):
     """
     For a given set of model parameters, run the ice thickness inversion and mass balance model to get binned annual ice thickness change
     Convert to monthly thickness by assuming that the flux divergence is constant throughout the year

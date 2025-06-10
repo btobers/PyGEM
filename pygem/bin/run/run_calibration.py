@@ -1420,9 +1420,7 @@ def run(list_packed_vars):
                     mbargs = (gdir,                                         # arguments for get_binned_dh()
                                 modelprms, 
                                 glacier_rgi_table, 
-                                fls, 
-                                glen_a_multiplier, 
-                                fs, 
+                                fls,
                                 gdir.oib_diffs['model_inds_map'], 
                                 gdir.oib_diffs['bin_edges'],
                                 gdir.oib_diffs['bin_centers'])

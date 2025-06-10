@@ -92,7 +92,7 @@ def main(jsonfp, outfp='', outdir=None):
         # axb.plot(bin_z, np.nanmin(stack,axis=0), 'r', label='Pred.')
 
         # dummy label for timespan
-        ax[t].text(0.992, 0.985, labels[t], transform=ax[t].transAxes, fontsize=8, verticalalignment='top', horizontalalignment='right', 
+        ax[t].text(0.99175, 0.980, labels[t], transform=ax[t].transAxes, fontsize=8, verticalalignment='top', horizontalalignment='right', 
                 bbox=dict(facecolor='white', edgecolor='black', alpha=1, boxstyle='square,pad=0.25'), zorder=10)
 
         secaxx = ax[t].secondary_xaxis('bottom', functions=(cum_area_to_elev, elev_to_cum_area))
@@ -113,9 +113,9 @@ def main(jsonfp, outfp='', outdir=None):
     ax[0].set_xlim([elev_to_cum_area(np.min(bin_z)), elev_to_cum_area(np.max(bin_z))])
 
 
-    # for a in ax:
+    for a in ax:
         # plot ela
-        # a.axvline(x=ela, c='k', ls=':', lw=1)
+        a.axvline(x=elev_to_cum_area(ela), c='k', ls=':', lw=1)
         # plot area
         # a.fill_between(bin_z, 0, np.asarray(data['area'])*1e-6, color='steelblue', alpha=.125)
         # a.set_ylim([0,a.get_ylim()[-1]*3])

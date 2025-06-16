@@ -579,7 +579,6 @@ def run(list_packed_vars):
 
         # ===== Load glacier data: area (km2), ice thickness (m), width (km) =====        
         try:
-        # for f in ['b']:
             if not glacier_rgi_table['TermType'] in [1,5] or not pygem_prms['setup']['include_frontalablation']:
                 gdir = single_flowline_glacier_directory(glacier_str)
                 gdir.is_tidewater = False
@@ -653,9 +652,8 @@ def run(list_packed_vars):
             assert os.path.exists(mbdata_fn), 'Mass balance data missing. Check dataset and column names'
 
         # oib deltah data
-        if args.option_calibration == 'MCMC' and args.oib:
+        if args.oib:
             try:
-            # for foo in ['bar']:
                 icebridge = oib.oib(rgi6id=glacier_str)
                 icebridge._rgi6torgi7id(debug=debug)
                 if icebridge.rgi7id:
@@ -699,17 +697,17 @@ def run(list_packed_vars):
                     gdir.oib_diffs['model_inds_map'] = [(index_map[val1], index_map[val2]) for val1, val2 in gdir.oib_diffs['dates']]
 
             except Exception as err:
-                fls = None  # set fls to None as to not proceed with calibration
                 if debug:
                     print(f'Error loading OIB data: {err}')
+                    continue
         
         # spinup
         if args.spinup:
             try:
                 fls = gdir.read_pickle("model_flowlines", filesuffix=f"_2000")
             except FileNotFoundError:
-                fls=None
                 print('FileNotFoundError: Model flowlines from dynamical scpinup not found')
+                continue
 
         else:
             fls = gdir.read_pickle("model_flowlines")   

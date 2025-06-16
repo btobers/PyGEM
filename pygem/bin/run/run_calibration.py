@@ -1282,13 +1282,13 @@ def run(list_packed_vars):
                     return mb_total_minelev
 
                 def get_priors(priors):
-                # define distribution based on priors
+                    # define distribution based on priors
                     dists = []
                     for param in ['tbias','kp','ddfsnow']:
                         if priors[param]['type'] == 'normal':
                             dist = stats.norm(loc=priors[param]['mu'], scale=priors[param]['sigma'])
                         elif priors[param]['type'] == 'uniform':
-                            dist = stats.uniform(low=priors[param]['low'], high=priors[param]['high'])
+                            dist = stats.uniform(loc=priors[param]['low'], scale=priors[param]['high'] - priors[param]['low'])
                         elif priors[param]['type'] == 'gamma':
                             dist = stats.gamma(a=priors[param]['alpha'], scale=1/priors[param]['beta'])
                         elif priors[param]['type'] == 'truncnormal':
@@ -1384,8 +1384,8 @@ def run(list_packed_vars):
 
                 # put all priors together into a dictionary
                 priors =    {
-                            'tbias':    {'type':pygem_prms['calib']['MCMC_params']['tbias_disttype'], 'mu':float(tbias_mu) , 'sigma':float(tbias_sigma), 'low':safe_float(getattr(pygem_prms,'tbias_bndlow',None)), 'high':safe_float(getattr(pygem_prms,'tbias_bndhigh',None))},
-                            'kp':       {'type':pygem_prms['calib']['MCMC_params']['kp_disttype'], 'alpha':float(kp_gamma_alpha), 'beta':float(kp_gamma_beta), 'low':safe_float(getattr(pygem_prms,'kp_bndlow',None)), 'high':safe_float(getattr(pygem_prms,'kp_bndhigh',None))},
+                            'tbias':    {'type':pygem_prms['calib']['MCMC_params']['tbias_disttype'], 'mu':float(tbias_mu) , 'sigma':float(tbias_sigma)},
+                            'kp':       {'type':pygem_prms['calib']['MCMC_params']['kp_disttype'], 'alpha':float(kp_gamma_alpha), 'beta':float(kp_gamma_beta)},
                             'ddfsnow':  {'type':pygem_prms['calib']['MCMC_params']['ddfsnow_disttype'], 'mu':pygem_prms['calib']['MCMC_params']['ddfsnow_mu'], 'sigma':pygem_prms['calib']['MCMC_params']['ddfsnow_sigma'] ,'low':float(pygem_prms['calib']['MCMC_params']['ddfsnow_bndlow']), 'high':float(pygem_prms['calib']['MCMC_params']['ddfsnow_bndhigh'])},
                             'rhoabl':   {'type':'normal', 'mu':900., 'sigma':17.},
                             'rhoacc':   {'type':'normal', 'mu':600., 'sigma':60.},  # from Huss, 2013 Table 1

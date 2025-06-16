@@ -77,7 +77,7 @@ def log_gamma_density(x, **kwargs):
     alpha, beta = kwargs['alpha'], kwargs['beta']   # shape, scale
     return alpha * torch.log(beta) + (alpha - 1) * torch.log(x) - beta * x - torch.lgamma(alpha)
 
-def log_truncated_normal(x, **kwargs):
+def log_truncated_normal_density(x, **kwargs):
     """
     Computes the log probability density of a truncated normal distribution.
 
@@ -108,11 +108,30 @@ def log_truncated_normal(x, **kwargs):
     
     return torch.log(pdf) - torch.log(normalization)
 
+def log_uniform_density(x, **kwargs):
+    """
+    Computes the log probability density of a Uniform distribution for scalar x.
+
+    Parameters:
+    - x: Scalar tensor where you want to evaluate the log probability.
+    - low: Lower bound of the uniform distribution.
+    - high: Upper bound of the uniform distribution.
+
+    Returns:
+        Scalar log probability density at x.
+    """
+    low, high = kwargs['low'], kwargs['high']
+    if low <= x <= high:
+        return -torch.log(high - low)
+    else:
+        return torch.tensor([float('-inf')])
+
 # mapper dictionary - maps to appropriate log probability density function for given distribution `type`
 log_prob_fxn_map = {
     'normal': log_normal_density,
     'gamma': log_gamma_density,
-    'truncnormal': log_truncated_normal
+    'truncnormal': log_truncated_normal_density,
+    'uniform': log_uniform_density
 }
 
 # mass balance posterior class
@@ -156,6 +175,10 @@ class mbPosterior:
             if self.priors[k]['type'] == 'gamma' and 'mu' not in self.priors[k].keys():
                 self.priors[k]['mu'] = self.priors[k]['alpha'] / self.priors[k]['beta']
                 self.priors[k]['sigma'] = float(np.sqrt(self.priors[k]['alpha']) / self.priors[k]['beta'])
+
+            if self.priors[k]['type'] == 'uniform' and 'mu' not in self.priors[k].keys():
+                self.priors[k]['mu'] = (self.priors[k]['low'] / self.priors[k]['high']) / 2
+                self.priors[k]['sigma'] = (self.priors[k]['high'] - self.priors[k]['low']) / (12**(1/2))
 
     # update modelprms for evaluation
     def update_modelprms(self, m):

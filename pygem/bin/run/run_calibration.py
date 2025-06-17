@@ -151,7 +151,6 @@ def mb_mwea_calc(gdir, modelprms, glacier_rgi_table, fls=None, t1=None, t2=None,
     """
     # RUN MASS BALANCE MODEL
     mbmod = PyGEMMassBalance(gdir, modelprms, glacier_rgi_table, fls=fls, option_areaconstant=True)
-    # years = np.arange(0, int(gdir.dates_table.shape[0]/12))
     for year in gdir.dates_table.year.unique():
         mbmod.get_annual_mb(fls[0].surface_h, fls=fls, fl_id=0, year=year)
     
@@ -183,7 +182,8 @@ def get_dmda(gdir, modelprms, glacier_rgi_table, fls=None, diff_inds_map=None, b
     Convert to monthly thickness by assuming that the flux divergence is constant throughout the year
     """
     nyears = int(gdir.dates_table.shape[0]/12) # number of years from dates table
-
+    y0 = gdir.dates_table.year.min()
+    y1 = gdir.dates_table.year.max()
     # Check that water level is within given bounds
     cls = gdir.read_pickle('inversion_input')[-1]
     th = cls['hgt'][-1]
@@ -191,18 +191,18 @@ def get_dmda(gdir, modelprms, glacier_rgi_table, fls=None, diff_inds_map=None, b
     water_level = utils.clip_scalar(0, th - vmax, th - vmin) 
     # mass balance model with evolving area
     mbmod = PyGEMMassBalance(gdir, modelprms, glacier_rgi_table,
-                                fls=gdir.read_pickle("model_flowlines", filesuffix="_2000"))
+                                fls=gdir.read_pickle("model_flowlines", filesuffix=f"_{y0}"))
     # glacier dynamics model    
     if gdir.is_tidewater:
-        ev_model = FluxBasedModel(gdir.read_pickle("model_flowlines", filesuffix="_2000"),
-                                y0=2000, mb_model=mbmod, 
+        ev_model = FluxBasedModel(gdir.read_pickle("model_flowlines", filesuffix=f"_{y0}"),
+                                y0=y0, mb_model=mbmod, 
                                 glen_a=gdir.get_diagnostics()['inversion_glen_a'],
                                 fs = gdir.get_diagnostics()['inversion_fs'],                                
                                 is_tidewater=gdir.is_tidewater,
                                 water_level=water_level)
     else:
-        ev_model = flowline.SemiImplicitModel(gdir.read_pickle("model_flowlines", filesuffix="_2000"),
-                                            y0=2000, mb_model=mbmod,
+        ev_model = flowline.SemiImplicitModel(gdir.read_pickle("model_flowlines", filesuffix=f"_{y0}"),
+                                            y0=y0, mb_model=mbmod,
                                             glen_a=gdir.get_diagnostics()['inversion_glen_a'],
                                             fs = gdir.get_diagnostics()['inversion_fs'],
                                             is_tidewater=gdir.is_tidewater,
@@ -210,9 +210,9 @@ def get_dmda(gdir, modelprms, glacier_rgi_table, fls=None, diff_inds_map=None, b
     
     try:
         # run glacier dynamics model forward
-        _, ds = ev_model.run_until_and_store(2020, fl_diag_path=True)
+        _, ds = ev_model.run_until_and_store(y1+1, fl_diag_path=True)
         with np.errstate(invalid='ignore'):
-            mb_mwea = mbmod.glac_wide_massbaltotal[gdir.mbdata['t1_idx']:gdir.mbdata['t2_idx']+1].sum() / mbmod.glac_wide_area_annual[0] / nyears
+            mb_mwea = mbmod.glac_wide_massbaltotal[gdir.mbdata['t1_idx']:gdir.mbdata['t2_idx']+1].sum() / mbmod.glac_wide_area_annual[0] / gdir.mbdata['nyears']
 
     # if there is an issue evaluating the dynamics model for a given parameter set in MCMC calibration, 
     # return -inf for mb_mwea and binned_dh, so MCMC calibration won't accept given parameters
@@ -656,45 +656,46 @@ def run(list_packed_vars):
             try:
                 icebridge = oib.oib(rgi6id=glacier_str)
                 icebridge._rgi6torgi7id(debug=debug)
-                if icebridge.rgi7id:
-                    icebridge._load()
-                    icebridge._parsediffs()
-                    icebridge._filter_on_pixel_count(pctl=pygem_prms['calib']['data']['oib']['oib_filter_pctl'], inplace=True)
-                    icebridge._terminus_mask(inplace=True)
-                    icebridge._remove_outliers_zscore(zscore=3, inplace=True)
-                    icebridge._rebin(agg=pygem_prms['calib']['data']['oib']['oib_rebin'], inplace=True)
-                    # only retain diffs for survey dates within model timespan
-                    _, oib_inds, pygem_inds = np.intersect1d(list(icebridge.oib_diffs.keys()), gdir.dates_table.date.to_numpy(), return_indices=True)
-                    # filter dictionary to retain only the diffs during times that fall within PyGEM calibration period
-                    icebridge.oib_diffs = {key: icebridge.oib_diffs[key] for i, key in enumerate(icebridge.oib_diffs) if i in oib_inds}
-                    if debug:
-                        print(f'OIB survey dates:\n{", ".join([str(dt.year)+"-"+str(dt.month)+"-"+str(dt.day) for dt in list(icebridge.oib_diffs.keys())])}')
-                    # must be at least two surveys
-                    if len(icebridge.oib_diffs) < 2:
-                        raise ValueError("Must be at least two individual OIB surveys to difference.")
-                    # double difference to remove the COP30 signal from the relative OIB surface elevation changes
-                    icebridge._dbl_diff()
-                    # convert to mass changes
-                    yrs = list(range(args.ref_startyear, args.ref_endyear + 1))
-                    ela = tasks.compute_ela(gdir, years=yrs)
-                    # return icebridge.dbl_diffs and attach to gdir
-                    gdir.oib_diffs = icebridge._get_dbldiffs()
-                    # ensure data to calibrate against
-                    if gdir.oib_diffs['dh'] is None:
-                        raise ValueError("No valid OIB data to calibrate against.")
-                    # store bin_edges and bin_area
-                    gdir.oib_diffs['bin_edges'] = icebridge._get_edges()
-                    gdir.oib_diffs['bin_centers'] = icebridge._get_centers()
-                    gdir.oib_diffs['bin_area'] = icebridge._get_area()
-                    # store ela info
-                    gdir.ela = {
-                                        'yr': yrs,
-                                        'z': ela.values.tolist()
-                                        }
-                    # create a dictionary that maps datetime values in gdir.dates_table to their indices
-                    index_map = {value: idx for idx, value in enumerate(gdir.dates_table.date.tolist())}
-                    # map each element in the gdir.oib_diffs['dates'] to its index in gdir.dates_table - these inds will be used to difference model results in MCMC calib
-                    gdir.oib_diffs['model_inds_map'] = [(index_map[val1], index_map[val2]) for val1, val2 in gdir.oib_diffs['dates']]
+                if icebridge.rgi7id is None:
+                    raise ValueError(f"No RGI7id found for {icebridge.rgi6id}")
+                icebridge._load()
+                icebridge._parsediffs()
+                icebridge._filter_on_pixel_count(pctl=pygem_prms['calib']['data']['oib']['oib_filter_pctl'], inplace=True)
+                icebridge._terminus_mask(inplace=True)
+                icebridge._remove_outliers_zscore(zscore=3, inplace=True)
+                icebridge._rebin(agg=pygem_prms['calib']['data']['oib']['oib_rebin'], inplace=True)
+                # only retain diffs for survey dates within model timespan
+                _, oib_inds, pygem_inds = np.intersect1d(list(icebridge.oib_diffs.keys()), gdir.dates_table.date.to_numpy(), return_indices=True)
+                # filter dictionary to retain only the diffs during times that fall within PyGEM calibration period
+                icebridge.oib_diffs = {key: icebridge.oib_diffs[key] for i, key in enumerate(icebridge.oib_diffs) if i in oib_inds}
+                if debug:
+                    print(f'OIB survey dates:\n{", ".join([str(dt.year)+"-"+str(dt.month)+"-"+str(dt.day) for dt in list(icebridge.oib_diffs.keys())])}')
+                # must be at least two surveys
+                if len(icebridge.oib_diffs) < 2:
+                    raise ValueError("Must be at least two individual OIB surveys to difference.")
+                # double difference to remove the COP30 signal from the relative OIB surface elevation changes
+                icebridge._dbl_diff()
+                # get ela from climate_historical (maximum year cannot be > 2019)
+                yrs = list(range(args.ref_startyear, min(args.ref_endyear, 2019) + 1))
+                ela = tasks.compute_ela(gdir, years=yrs)
+                # return icebridge.dbl_diffs and attach to gdir
+                gdir.oib_diffs = icebridge._get_dbldiffs()
+                # ensure data to calibrate against
+                if gdir.oib_diffs['dh'] is None:
+                    raise ValueError("No valid OIB data to calibrate against.")
+                # store bin_edges and bin_area
+                gdir.oib_diffs['bin_edges'] = icebridge._get_edges()
+                gdir.oib_diffs['bin_centers'] = icebridge._get_centers()
+                gdir.oib_diffs['bin_area'] = icebridge._get_area()
+                # store ela info
+                gdir.ela = {
+                                    'yr': yrs,
+                                    'z': ela.values.tolist()
+                                    }
+                # create a dictionary that maps datetime values in gdir.dates_table to their indices
+                index_map = {value: idx for idx, value in enumerate(gdir.dates_table.date.tolist())}
+                # map each element in the gdir.oib_diffs['dates'] to its index in gdir.dates_table - these inds will be used to difference model results in MCMC calib
+                gdir.oib_diffs['model_inds_map'] = [(index_map[val1], index_map[val2]) for val1, val2 in gdir.oib_diffs['dates']]
 
             except Exception as err:
                 if debug:
@@ -704,7 +705,16 @@ def run(list_packed_vars):
         # spinup
         if args.spinup:
             try:
-                fls = gdir.read_pickle("model_flowlines", filesuffix=f"_2000")
+                # instantiate flowline.FileModel object from model_geometry_dynamic_spinup
+                fmd_dynamic = flowline.FileModel(gdir.get_filepath("model_geometry", filesuffix=f"_dynamic_spinup_pygem_mb"))
+                # run FileModel to startyear (it will be initialized at `spinup_start_yr`)
+                fmd_dynamic.run_until(args.ref_startyear);
+                # write flowlines
+                gdir.write_pickle(fmd_dynamic.fls, "model_flowlines", filesuffix=f"_{args.ref_startyear}");
+                # add debris
+                debris.debris_binned(gdir, fl_str="model_flowlines", filesuffix=f"_{args.ref_startyear}");
+                # store flowlines
+                fls = gdir.read_pickle("model_flowlines", filesuffix=f"_{args.ref_startyear}")
             except FileNotFoundError:
                 print('FileNotFoundError: Model flowlines from dynamical scpinup not found')
                 continue

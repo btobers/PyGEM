@@ -70,7 +70,7 @@ class oib:
         elif len(df_sub)==0:
             raise IndexError(f'No matching RGI7Id for {self.rgi6id}')
         elif len(df_sub)>1:
-            self.rgi6id = df_sub.sort_values(by='rgi6_area_fraction', ascending=False).iloc[0]['rgi7_id']
+            self.rgi7id = df_sub.sort_values(by='rgi6_area_fraction', ascending=False).iloc[0]['rgi7_id']
         
 
     def _rgi7torgi6id(self, debug=False):

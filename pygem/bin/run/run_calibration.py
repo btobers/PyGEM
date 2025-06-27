@@ -1306,18 +1306,21 @@ def run(list_packed_vars):
                         dists.append(dist)
                     return dists
 
-                def get_initials(dists, threshold=.01):
-                    # sample priors - ensure that probability of each sample > .01
-                    initials = None
-                    while initials is None:
-                        # sample from each distribution
-                        xs = [dist.rvs() for dist in dists]
-                        # calculate densities for each sample
-                        ps = [dist.pdf(x) for dist, x in zip(dists, xs)]
+                def get_initials(dists, threshold=.01, pctl=None):
+                    if pctl:
+                        initials = [dist.ppf(pctl) for dist in dists]
+                    else:
+                        # sample priors - ensure that probability of each sample > .01
+                        initials = None
+                        while initials is None:
+                            # sample from each distribution
+                            xs = [dist.rvs() for dist in dists]
+                            # calculate densities for each sample
+                            ps = [dist.pdf(x) for dist, x in zip(dists, xs)]
 
-                        # Check if all densities are greater than the threshold
-                        if all(p > threshold for p in ps):
-                            initials = xs
+                            # Check if all densities are greater than the threshold
+                            if all(p > threshold for p in ps):
+                                initials = xs
                     return initials
                 
                 def mb_max(**kwargs):

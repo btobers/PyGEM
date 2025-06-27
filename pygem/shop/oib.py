@@ -19,11 +19,12 @@ import pygem.setup.config as config
 pygem_prms = config.read_config()  # This reads the configuration file
 
 class oib:
-    def __init__(self, rgi6id='', rgi7id=''):
-        self.oib_datpath = f"{pygem_prms['root']}/{pygem_prms['calib']['data']['oib']['oib_relpath']}"
-        self.rgi7_6_df = pd.read_csv(f"{self.oib_datpath}/../RGI2000-v7.0-G-01_alaska-rgi6_links.csv")
-        self.rgi7_6_df['rgi7_id'] = self.rgi7_6_df['rgi7_id'].str.split('RGI2000-v7.0-G-').str[1]
-        self.rgi7_6_df['rgi6_id'] = self.rgi7_6_df['rgi6_id'].str.split('RGI60-').str[1]
+    def __init__(self, rgi6id='', rgi7id='', oib_datpath=f"{pygem_prms['root']}/{pygem_prms['calib']['data']['oib']['oib_relpath']}", rgi7_rgi6_linksfn='RGI2000-v7.0-G-01_alaska-rgi6_links.csv'):
+        self.oib_datpath = oib_datpath
+        if rgi7_rgi6_linksfn in os.listdir(f'{self.oib_datpath}/../'):
+            self.rgi7_6_df = pd.read_csv(f"{self.oib_datpath}/../RGI2000-v7.0-G-01_alaska-rgi6_links.csv")
+            self.rgi7_6_df['rgi7_id'] = self.rgi7_6_df['rgi7_id'].str.split('RGI2000-v7.0-G-').str[1]
+            self.rgi7_6_df['rgi6_id'] = self.rgi7_6_df['rgi6_id'].str.split('RGI60-').str[1]
         self.rgi6id = rgi6id
         self.rgi7id = rgi7id
         self.name = None

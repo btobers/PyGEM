@@ -1488,38 +1488,57 @@ def run(list_packed_vars):
                 # --------------------               
                 try:
                     ### loop over chains, adjust initial guesses accordingly. done in a while loop as to repeat a chain up to one time if it remained stuck throughout ###
-                    n_chain=0
-                    repeat=False
+                    attempts_per_chain = 2          # number of repeats per chain (each with different initial guesses)
+                    n_chain = 0
                     while n_chain < args.nchains:
-                        # compile initial guesses and standardize by standard deviations
-                        # for 0th chain, take mean from regional priors
-                        if n_chain == 0:
-                            initial_guesses = torch.tensor((tbias_mu, kp_gamma_alpha / kp_gamma_beta, pygem_prms['calib']['MCMC_params']['ddfsnow_mu']))
-                        # for all chains > 0, randomly sample from regional priors
-                        else:
-                            initial_guesses = torch.tensor(get_initials(prior_dists))
-                        if args.oib:
-                            initial_guesses = torch.cat((initial_guesses, torch.tensor([900., 600.])))
-                        if debug:
-                            print(f"{glacier_str} chain {n_chain} initials:\ntbias: {initial_guesses[0]:.2f}, kp: {initial_guesses[1]:.2f}, ddfsnow: {initial_guesses[2]:.4f}, rhoabl: {initial_guesses[3]:.1f}, rhoacc: {initial_guesses[4]:.1f}")
+                        n_attempts = 0
+                        chain_completed = False
+                        while not chain_completed and n_attempts < attempts_per_chain:
+                            # Select initial guesses
+                            if n_chain == 0 and n_attempts == 0:
+                                initial_guesses = torch.tensor((
+                                    tbias_mu,
+                                    kp_gamma_alpha / kp_gamma_beta,
+                                    pygem_prms['calib']['MCMC_params']['ddfsnow_mu']
+                                ))
+                            else:
+                                initial_guesses = torch.tensor(get_initials(prior_dists))
+                            if args.oib:
+                                initial_guesses = torch.cat((initial_guesses, torch.tensor([900., 600.])))
+                            if debug:
+                                print(
+                                    f"{glacier_str} chain {n_chain} attempt {n_attempts} initials:\n"
+                                    f"tbias: {initial_guesses[0]:.2f}, kp: {initial_guesses[1]:.2f}, ddfsnow: {initial_guesses[2]:.4f}"
+                                    + (f", rhoabl: {initial_guesses[3]:.1f}, rhoacc: {initial_guesses[4]:.1f}" if args.oib else "")
+                                )
 
-                        # instantiate sampler
-                        sampler = mcmc.Metropolis(mb.means, mb.stds)
+                            # instantiate sampler
+                            sampler = mcmc.Metropolis(mb.means, mb.stds)
+                            # draw samples
+                            m_chain, pred_chain, m_primes, pred_primes, _, ar = sampler.sample(
+                                initial_guesses,
+                                mb.log_posterior,
+                                n_samples=args.chain_length,
+                                h=pygem_prms['calib']['MCMC_params']['mcmc_step'],
+                                burnin=int(args.burn_pct / 100 * args.chain_length),
+                                thin_factor=args.thin,
+                                progress_bar=args.progress_bar
+                            )
 
-                        # draw samples
-                        m_chain, pred_chain, m_primes, pred_primes, _, ar = sampler.sample(initial_guesses, 
-                                                                                                    mb.log_posterior, 
-                                                                                                    n_samples=args.chain_length, 
-                                                                                                    h=pygem_prms['calib']['MCMC_params']['mcmc_step'], 
-                                                                                                    burnin=int(args.burn_pct/100*args.chain_length), 
-                                                                                                    thin_factor=args.thin, 
-                                                                                                    progress_bar=args.progress_bar)
+                            # Check if stuck - this simply checks if the first column of the chain (tbias) is constant
+                            if (m_chain[:, 0] == m_chain[0, 0]).all():
+                                if debug:
+                                    print(f"Chain {n_chain}, attempt {n_attempts}: stuck. Trying a different initial guess.")
+                                n_attempts += 1
+                                continue  # Try a new initial guess
+                            else:
+                                chain_completed = True
+                                break
 
-                        # Check condition at the end
-                        if (m_chain[:, 0] == m_chain[0, 0]).all():
-                            if not repeat and n_chain!=0:
-                                repeat = True
-                                continue
+                        if not chain_completed and debug:
+                            print(
+                                f"Chain {n_chain}: failed to produce an unstuck result after {attempts_per_chain} initial guesses."
+                            )
 
                         # concatenate mass balance
                         m_chain = torch.cat((m_chain, torch.tensor(pred_chain[0]).reshape(-1,1)), dim=1)

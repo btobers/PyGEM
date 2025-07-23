@@ -271,11 +271,13 @@ class Metropolis:
         """
         n_params = len(self.m_chain[0])
         n_rms = []
+        # get z-normalized vals
+        z_norms = [z_normalize(vals, self.means, self.stds) for vals in self.m_chain]
         for i in range(n_params):
-            vals = [val[i] for val in self.m_chain]
-            first_value = vals[0]
+            param_vals = [vals[i] for vals in z_norms]
+            first_value = param_vals[0]
             count = 0
-            for value in vals:
+            for value in param_vals:
                 if abs(value - first_value) <= tol:
                     count += 1
                 else:

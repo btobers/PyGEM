@@ -78,7 +78,7 @@ def run(glacno_list, spinup_start_yr, **kwargs):
                                 "tsnow_threshold": pygem_prms["sim"]["params"]["tsnow_threshold"]}
 
             # update cfg.PARAMS
-            update_cfg({"continue_on_error" : True}, "PARAMS")
+            update_cfg({"continue_on_error" : False}, "PARAMS")
             update_cfg({"store_model_geometry" : True}, "PARAMS")
 
             # perform OGGM dynamic spinup
@@ -116,7 +116,7 @@ def main():
                         help='filepath containing list of rgi_glac_number, helpful for running batches on spc'),
     parser.add_argument('-spinup_start_yr', type=int, default=1979)
     parser.add_argument('-target_yr', type=int, default=None)
-    parser.add_argument('-ye', type=int, default=None)
+    parser.add_argument('-ye', type=int, default=2020)
     parser.add_argument('-ncores', action='store', type=int, default=1,
                         help='number of simultaneous processes (cores) to use')
     args = parser.parse_args()

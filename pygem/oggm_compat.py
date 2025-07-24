@@ -82,7 +82,7 @@ def single_flowline_glacier_directory(rgi_id, reset=pygem_prms['oggm']['overwrit
     # check if gdir is already processed
     if not reset:
         try:
-            gdir = utils.GlacierDirectory(rgi_id)
+            gdir = workflow.init_glacier_directories([rgi_id])[0]
             gdir.read_pickle('inversion_flowlines')
 
         except:
@@ -168,7 +168,7 @@ def single_flowline_glacier_directory_with_calving(rgi_id, reset=pygem_prms['ogg
     # check if gdir is already processed
     if not reset:
         try:
-            gdir = utils.GlacierDirectory(rgi_id)
+            gdir = workflow.init_glacier_directories([rgi_id])[0]
             gdir.read_pickle('inversion_flowlines')
 
         except:

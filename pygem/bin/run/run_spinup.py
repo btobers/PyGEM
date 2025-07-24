@@ -78,7 +78,7 @@ def run(glacno_list, spinup_start_yr, **kwargs):
                                 "tsnow_threshold": pygem_prms["sim"]["params"]["tsnow_threshold"]}
 
             # update cfg.PARAMS
-            update_cfg({"continue_on_error" : False}, "PARAMS")
+            update_cfg({"continue_on_error" : True}, "PARAMS")
             update_cfg({"store_model_geometry" : True}, "PARAMS")
 
             # perform OGGM dynamic spinup

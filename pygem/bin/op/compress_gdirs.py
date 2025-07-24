@@ -28,7 +28,7 @@ cfg.PARAMS['use_multiprocessing'] = True
 def compress_region(region):
     print(f"\n=== Compressing glacier directories for RGI Region: {region} ===")
     # Get glacier IDs from the RGI shapefile
-    rgi_ids = gpd.read_file(utils.get_rgi_region_file(region, version='62'))['RGIId'].tolist()
+    rgi_ids = gpd.read_file(utils.get_rgi_region_file(str(region).zfill(2), version='62'))['RGIId'].tolist()
 
     # Initialize glacier directories
     gdirs = workflow.init_glacier_directories(rgi_ids)
@@ -43,18 +43,10 @@ def compress_region(region):
 def main():
     parser = argparse.ArgumentParser(description="Script to compress and store OGGM glacier directories")
     # add arguments
-    parser.add_argument(
-        'regions',
-        nargs='+',
-        choices=[f"{i:02d}" for i in range(1, 20)],
-        help="List of RGI region codes to process (e.g., 01 02 03)"
-    )
-    parser.add_argument(
-        '--ncores',
-        type=int,
-        default=1,
-        help="Number of parallel processes to run"
-    )
+    parser.add_argument('-rgi_region01', type=int, default=pygem_prms['setup']['rgi_region01'],
+                        help='Randoph Glacier Inventory region (can take multiple, e.g. `-run_region01 1 2 3`)', nargs='+')
+    parser.add_argument('-ncores', action='store', type=int, default=1,
+                        help='number of simultaneous processes (cores) to use')
     args = parser.parse_args()
 
     n_processes = min(len(args.regions), args.ncores)

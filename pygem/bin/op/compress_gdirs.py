@@ -22,7 +22,7 @@ pygem_prms = config.read_config()
 # Initialize OGGM subprocess
 cfg.initialize(logging_level='WARNING')
 cfg.PATHS['working_dir'] = f"{pygem_prms['root']}/{pygem_prms['oggm']['oggm_gdir_relpath']}"
-cfg.PARAMS['border'] = 80
+cfg.PARAMS['border'] = pygem_prms['oggm']['border']
 cfg.PARAMS['use_multiprocessing'] = True
 
 def compress_region(region):

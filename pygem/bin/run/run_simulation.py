@@ -164,6 +164,8 @@ def getparser():
     parser.add_argument('-modelprms_fp', action='store', type=str, default=None,
                         help='model parameters filepath')
     # flags
+    parser.add_argument('-spinup', action='store_true', default=False,
+                        help='Flag to perform dynamical spinup before calibration')
     parser.add_argument('-export_all_simiters', action='store_true',
                         help='Flag to export data from all simulations', default=pygem_prms['sim']['out']['export_all_simiters'])  
     parser.add_argument('-export_extra_vars', action='store_true',
@@ -624,35 +626,64 @@ def run(list_packed_vars):
                                                       fls=fls, option_areaconstant=True,
                                                       inversion_filter=inversion_filter)
 
-                        # Non-tidewater glaciers
-                        if not gdir.is_tidewater or not pygem_prms['setup']['include_frontalablation']:
-                            # Arbitrariliy shift the MB profile up (or down) until mass balance is zero (equilibrium for inversion)
-                            apparent_mb_from_any_mb(gdir, mb_model=mbmod_inv)
-                            tasks.prepare_for_inversion(gdir)
-                            tasks.mass_conservation_inversion(gdir, glen_a=cfg.PARAMS['glen_a']*glen_a_multiplier, fs=fs)
+                        if not args.spinup:
+                            # # Non-tidewater glaciers
+                            # if not gdir.is_tidewater or not pygem_prms['setup']['include_frontalablation']:
+                            #     # Arbitrariliy shift the MB profile up (or down) until mass balance is zero (equilibrium for inversion)
+                            #     apparent_mb_from_any_mb(gdir, mb_model=mbmod_inv, mb_years=np.arange(nyears_ref))
+                            #     tasks.prepare_for_inversion(gdir)
+                            #     tasks.mass_conservation_inversion(gdir, glen_a=cfg.PARAMS['glen_a']*glen_a_multiplier, fs=fs)
 
-                        # Tidewater glaciers
+                            # # Tidewater glaciers
+                            # else:
+                            #     cfg.PARAMS['use_kcalving_for_inversion'] = True
+                            #     cfg.PARAMS['use_kcalving_for_run'] = True
+                            #     tasks.find_inversion_calving_from_any_mb(gdir, mb_model=mbmod_inv, mb_years=np.arange(nyears_ref),
+                            #                                                       glen_a=cfg.PARAMS['glen_a']*glen_a_multiplier, fs=fs)
+                                    
+                            # # ----- INDENTED TO BE JUST WITH DYNAMICS -----
+                            # tasks.init_present_time_glacier(gdir) # adds bins below
+                            # if pygem_prms['mb']['include_debris']:
+                            #     debris.debris_binned(gdir, fl_str='model_flowlines')  # add debris enhancement factors to flowlines
+            
+                            # try:
+                            #     nfls = gdir.read_pickle('model_flowlines')
+                            # except FileNotFoundError as e:
+                            #     if 'model_flowlines.pkl' in str(e):
+                            #         tasks.compute_downstream_line(gdir)
+                            #         tasks.compute_downstream_bedshape(gdir)
+                            #         tasks.init_present_time_glacier(gdir) # adds bins below
+                            #         nfls = gdir.read_pickle('model_flowlines')
+                            #     else:
+                            #         raise
+                            # glen_a = cfg.PARAMS['glen_a']*glen_a_multiplier
+                            # fs = fs
+                            pass
+
+                        # spinup
                         else:
-                            cfg.PARAMS['use_kcalving_for_inversion'] = True
-                            cfg.PARAMS['use_kcalving_for_run'] = True
-                            tasks.find_inversion_calving_from_any_mb(gdir, mb_model=mbmod_inv,
-                                                                              glen_a=cfg.PARAMS['glen_a']*glen_a_multiplier, fs=fs)
-                                
-                        # ----- INDENTED TO BE JUST WITH DYNAMICS -----
-                        tasks.init_present_time_glacier(gdir) # adds bins below
-                        if pygem_prms['mb']['include_debris']:
-                            debris.debris_binned(gdir, fl_str='model_flowlines')  # add debris enhancement factors to flowlines
-        
-                        try:
-                            nfls = gdir.read_pickle('model_flowlines')
-                        except FileNotFoundError as e:
-                            if 'model_flowlines.pkl' in str(e):
-                                tasks.compute_downstream_line(gdir)
-                                tasks.compute_downstream_bedshape(gdir)
-                                tasks.init_present_time_glacier(gdir) # adds bins below
-                                nfls = gdir.read_pickle('model_flowlines')
-                            else:
-                                raise
+                            try:
+                                # see if model_flowlines from spinup exist
+                                try:
+                                    debris.debris_binned(gdir, fl_str="model_flowlines", filesuffix=f"_{args.gcm_startyear}");
+                                    nfls = gdir.read_pickle("model_flowlines", filesuffix=f"_{args.gcm_startyear}")
+                                except FileNotFoundError:
+                                    # instantiate flowline.FileModel object from model_geometry_dynamic_spinup
+                                    fmd_dynamic = flowline.FileModel(gdir.get_filepath("model_geometry", filesuffix=f"_dynamic_spinup_pygem_mb"))
+                                    # run FileModel to startyear (it will be initialized at `spinup_start_yr`)
+                                    fmd_dynamic.run_until(args.gcm_startyear);
+                                    # write flowlines
+                                    gdir.write_pickle(fmd_dynamic.fls, "model_flowlines", filesuffix=f"_{args.gcm_startyear}");
+                                    # add debris
+                                    debris.debris_binned(gdir, fl_str="model_flowlines", filesuffix=f"_{args.gcm_startyear}");
+                                    # store flowlines
+                                    nfls = gdir.read_pickle("model_flowlines", filesuffix=f"_{args.gcm_startyear}")
+                                # get PyGEM inversion glen_a and sliding factor
+                                glen_a = gdir.get_diagnostics()['inversion_glen_a']
+                                fs = gdir.get_diagnostics()['inversion_fs']
+                            except FileNotFoundError:
+                                print('FileNotFoundError: Model flowlines from dynamical scpinup not found')
+                                continue
 
                         # Water Level
                         # Check that water level is within given bounds
@@ -682,19 +713,14 @@ def run(list_packed_vars):
                         if gdir.is_tidewater:
                             ev_model = FluxBasedModel(nfls,
                                                     y0=args.gcm_startyear, mb_model=mbmod, 
-                                                    # glen_a=gdir.get_diagnostics()['inversion_glen_a'],
-                                                    # fs = gdir.get_diagnostics()['inversion_fs'],      
-                                                    glen_a=cfg.PARAMS['glen_a']*glen_a_multiplier,
+                                                    glen_a=glen_a,
                                                     fs=fs,
                                                     is_tidewater=gdir.is_tidewater,
                                                     water_level=water_level)
-
                         else:
                             ev_model = flowline.SemiImplicitModel(nfls,
                                                                 y0=args.gcm_startyear, mb_model=mbmod,
-                                                                # glen_a=gdir.get_diagnostics()['inversion_glen_a'],
-                                                                # fs = gdir.get_diagnostics()['inversion_fs'],      
-                                                                glen_a=cfg.PARAMS['glen_a']*glen_a_multiplier,
+                                                                glen_a=glen_a,
                                                                 fs=fs,
                                                                 is_tidewater=gdir.is_tidewater,
                                                                 water_level=water_level)

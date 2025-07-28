@@ -58,6 +58,7 @@ from oggm import tasks
 from oggm import utils
 from oggm.core.massbalance import apparent_mb_from_any_mb
 from oggm.core.flowline import FluxBasedModel, SemiImplicitModel
+from oggm.core import flowline
 
 cfg.PARAMS['hydro_month_nh']=1
 cfg.PARAMS['hydro_month_sh']=1
@@ -427,13 +428,12 @@ def run(list_packed_vars):
                 # Load model parameters
                 if args.option_calibration:
                     modelprms_fp = args.modelprms_fp
-                    if os.path.isdir(modelprms_fp):
-                        modelprms_fp = modelprms_fp + '/' + glacier_str + '-modelprms_dict.json'
-                    if not modelprms_fp:                    
+                    if modelprms_fp is None:                    
                         modelprms_fn = glacier_str + '-modelprms_dict.json'
                         modelprms_fp = (pygem_prms['root'] + '/Output/calibration/' + glacier_str.split('.')[0].zfill(2) 
                                         + '/') + modelprms_fn
-    
+                    elif os.path.isdir(modelprms_fp):
+                        modelprms_fp = modelprms_fp + '/' + glacier_str + '-modelprms_dict.json'
                     assert os.path.exists(modelprms_fp), 'Calibrated parameters do not exist.'
                     with open(modelprms_fp, 'r') as f:
                         modelprms_dict = json.load(f)
@@ -623,19 +623,11 @@ def run(list_packed_vars):
                         mbmod_inv = PyGEMMassBalance(gdir_ref, modelprms, glacier_rgi_table,
                                                       fls=fls, option_areaconstant=True,
                                                       inversion_filter=inversion_filter)
-#                        if debug:
-#                            h, w = gdir.get_inversion_flowline_hw()
-#                            mb_t0 = (mbmod_inv.get_annual_mb(h, year=0, fl_id=0, fls=fls) * cfg.SEC_IN_YEAR * 
-#                                     pygem_prms['constants']['density_ice'] / pygem_prms['constants']['density_water']) 
-#                            plt.plot(mb_t0, h, '.')
-#                            plt.ylabel('Elevation')
-#                            plt.xlabel('Mass balance (mwea)')
-#                            plt.show()
 
                         # Non-tidewater glaciers
                         if not gdir.is_tidewater or not pygem_prms['setup']['include_frontalablation']:
                             # Arbitrariliy shift the MB profile up (or down) until mass balance is zero (equilibrium for inversion)
-                            apparent_mb_from_any_mb(gdir, mb_model=mbmod_inv, mb_years=np.arange(nyears_ref))
+                            apparent_mb_from_any_mb(gdir, mb_model=mbmod_inv)
                             tasks.prepare_for_inversion(gdir)
                             tasks.mass_conservation_inversion(gdir, glen_a=cfg.PARAMS['glen_a']*glen_a_multiplier, fs=fs)
 
@@ -643,7 +635,7 @@ def run(list_packed_vars):
                         else:
                             cfg.PARAMS['use_kcalving_for_inversion'] = True
                             cfg.PARAMS['use_kcalving_for_run'] = True
-                            tasks.find_inversion_calving_from_any_mb(gdir, mb_model=mbmod_inv, mb_years=np.arange(nyears_ref),
+                            tasks.find_inversion_calving_from_any_mb(gdir, mb_model=mbmod_inv,
                                                                               glen_a=cfg.PARAMS['glen_a']*glen_a_multiplier, fs=fs)
                                 
                         # ----- INDENTED TO BE JUST WITH DYNAMICS -----
@@ -686,20 +678,33 @@ def run(list_packed_vars):
                         if debug:
                             print('OGGM GLACIER DYNAMICS!')
                             
-                        # new numerical scheme is SemiImplicitModel() but doesn't have frontal ablation yet
-                        # FluxBasedModel is old numerical scheme but includes frontal ablation
-                        ev_model = FluxBasedModel(nfls, y0=0, mb_model=mbmod, 
-                                                  glen_a=cfg.PARAMS['glen_a']*glen_a_multiplier, fs=fs,
-                                                  is_tidewater=gdir.is_tidewater,
-                                                  water_level=water_level
-                                                  )
+                        # glacier dynamics model    
+                        if gdir.is_tidewater:
+                            ev_model = FluxBasedModel(nfls,
+                                                    y0=args.gcm_startyear, mb_model=mbmod, 
+                                                    # glen_a=gdir.get_diagnostics()['inversion_glen_a'],
+                                                    # fs = gdir.get_diagnostics()['inversion_fs'],      
+                                                    glen_a=cfg.PARAMS['glen_a']*glen_a_multiplier,
+                                                    fs=fs,
+                                                    is_tidewater=gdir.is_tidewater,
+                                                    water_level=water_level)
+
+                        else:
+                            ev_model = flowline.SemiImplicitModel(nfls,
+                                                                y0=args.gcm_startyear, mb_model=mbmod,
+                                                                # glen_a=gdir.get_diagnostics()['inversion_glen_a'],
+                                                                # fs = gdir.get_diagnostics()['inversion_fs'],      
+                                                                glen_a=cfg.PARAMS['glen_a']*glen_a_multiplier,
+                                                                fs=fs,
+                                                                is_tidewater=gdir.is_tidewater,
+                                                                water_level=water_level)
                         
                         if debug:
                             graphics.plot_modeloutput_section(ev_model)
                             plt.show()
 
                         try:                        
-                            diag = ev_model.run_until_and_store(nyears)
+                            diag = ev_model.run_until_and_store(args.gcm_endyear+1)
                             ev_model.mb_model.glac_wide_volume_annual[-1] = diag.volume_m3[-1]
                             ev_model.mb_model.glac_wide_area_annual[-1] = diag.area_m2[-1]
                             

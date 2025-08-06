@@ -627,38 +627,35 @@ def run(list_packed_vars):
                                                       inversion_filter=inversion_filter)
 
                         if not args.spinup:
-                            # # Non-tidewater glaciers
-                            # if not gdir.is_tidewater or not pygem_prms['setup']['include_frontalablation']:
-                            #     # Arbitrariliy shift the MB profile up (or down) until mass balance is zero (equilibrium for inversion)
-                            #     apparent_mb_from_any_mb(gdir, mb_model=mbmod_inv, mb_years=np.arange(nyears_ref))
-                            #     tasks.prepare_for_inversion(gdir)
-                            #     tasks.mass_conservation_inversion(gdir, glen_a=cfg.PARAMS['glen_a']*glen_a_multiplier, fs=fs)
+                            # Non-tidewater glaciers
+                            if not gdir.is_tidewater:
+                                # Arbitrariliy shift the MB profile up (or down) until mass balance is zero (equilibrium for inversion)
+                                apparent_mb_from_any_mb(gdir, mb_model=mbmod_inv)
+                                tasks.prepare_for_inversion(gdir)
+                                tasks.mass_conservation_inversion(gdir, glen_a=cfg.PARAMS['glen_a']*glen_a_multiplier, fs=fs)
 
-                            # # Tidewater glaciers
-                            # else:
-                            #     cfg.PARAMS['use_kcalving_for_inversion'] = True
-                            #     cfg.PARAMS['use_kcalving_for_run'] = True
-                            #     tasks.find_inversion_calving_from_any_mb(gdir, mb_model=mbmod_inv, mb_years=np.arange(nyears_ref),
-                            #                                                       glen_a=cfg.PARAMS['glen_a']*glen_a_multiplier, fs=fs)
+                            # Tidewater glaciers
+                            else:
+                                tasks.find_inversion_calving_from_any_mb(gdir, mb_model=mbmod_inv,
+                                                                                  glen_a=cfg.PARAMS['glen_a']*glen_a_multiplier, fs=fs)
                                     
-                            # # ----- INDENTED TO BE JUST WITH DYNAMICS -----
-                            # tasks.init_present_time_glacier(gdir) # adds bins below
-                            # if pygem_prms['mb']['include_debris']:
-                            #     debris.debris_binned(gdir, fl_str='model_flowlines')  # add debris enhancement factors to flowlines
+                            # ----- INDENTED TO BE JUST WITH DYNAMICS -----
+                            tasks.init_present_time_glacier(gdir) # adds bins below
+                            if pygem_prms['mb']['include_debris']:
+                                debris.debris_binned(gdir, fl_str='model_flowlines')  # add debris enhancement factors to flowlines
             
-                            # try:
-                            #     nfls = gdir.read_pickle('model_flowlines')
-                            # except FileNotFoundError as e:
-                            #     if 'model_flowlines.pkl' in str(e):
-                            #         tasks.compute_downstream_line(gdir)
-                            #         tasks.compute_downstream_bedshape(gdir)
-                            #         tasks.init_present_time_glacier(gdir) # adds bins below
-                            #         nfls = gdir.read_pickle('model_flowlines')
-                            #     else:
-                            #         raise
-                            # glen_a = cfg.PARAMS['glen_a']*glen_a_multiplier
-                            # fs = fs
-                            pass
+                            try:
+                                nfls = gdir.read_pickle('model_flowlines')
+                            except FileNotFoundError as e:
+                                if 'model_flowlines.pkl' in str(e):
+                                    tasks.compute_downstream_line(gdir)
+                                    tasks.compute_downstream_bedshape(gdir)
+                                    tasks.init_present_time_glacier(gdir) # adds bins below
+                                    nfls = gdir.read_pickle('model_flowlines')
+                                else:
+                                    raise
+                            glen_a = cfg.PARAMS['glen_a']*glen_a_multiplier
+                            fs = fs
 
                         # spinup
                         else:
@@ -778,13 +775,13 @@ def run(list_packed_vars):
                                     print('OGGM dynamics failed, using mass redistribution curves')
                                 # Mass redistribution curves glacier dynamics model
                                 ev_model = MassRedistributionCurveModel(
-                                                nfls, mb_model=mbmod, y0=0,
+                                                nfls, mb_model=mbmod, y0=args.gcm_startyear,
                                                 glen_a=cfg.PARAMS['glen_a']*glen_a_multiplier, fs=fs,
                                                 is_tidewater=gdir.is_tidewater,
                                                 water_level=water_level,
                                                 spinupyears=pygem_prms['climate']['ref_spinupyears']
                                                 )
-                                _, diag = ev_model.run_until_and_store(nyears)
+                                _, diag = ev_model.run_until_and_store(args.gcm_endyear+1)
                                 ev_model.mb_model.glac_wide_volume_annual = diag.volume_m3.values
                                 ev_model.mb_model.glac_wide_area_annual = diag.area_m2.values
                 
@@ -807,12 +804,12 @@ def run(list_packed_vars):
                                     print('OGGM dynamics failed, using mass redistribution curves')
                                                                 # Mass redistribution curves glacier dynamics model
                                 ev_model = MassRedistributionCurveModel(
-                                                nfls, mb_model=mbmod, y0=0,
+                                                nfls, mb_model=mbmod, y0=args.gcm_startyear,
                                                 glen_a=cfg.PARAMS['glen_a']*glen_a_multiplier, fs=fs,
                                                 is_tidewater=gdir.is_tidewater,
                                                 water_level=water_level
                                                 )
-                                _, diag = ev_model.run_until_and_store(nyears)
+                                _, diag = ev_model.run_until_and_store(args.gcm_endyear+1)
                                 ev_model.mb_model.glac_wide_volume_annual = diag.volume_m3.values
                                 ev_model.mb_model.glac_wide_area_annual = diag.area_m2.values
                 
@@ -837,10 +834,9 @@ def run(list_packed_vars):
                         if debug:
                             print('MASS REDISTRIBUTION CURVES!')
                         ev_model = MassRedistributionCurveModel(
-                                nfls, mb_model=mbmod, y0=0,
+                                nfls, mb_model=mbmod, y0=args.gcm_startyear,
                                 glen_a=cfg.PARAMS['glen_a']*glen_a_multiplier, fs=fs,
                                 is_tidewater=gdir.is_tidewater,
-#                                water_level=gdir.get_diagnostics().get('calving_water_level', None)
                                 water_level=water_level
                                 )
 
@@ -849,7 +845,7 @@ def run(list_packed_vars):
                             graphics.plot_modeloutput_section(ev_model)
                             plt.show()
                         try:
-                            _, diag = ev_model.run_until_and_store(nyears)
+                            _, diag = ev_model.run_until_and_store(args.gcm_endyear+1)
 #                            print('shape of volume:', ev_model.mb_model.glac_wide_volume_annual.shape, diag.volume_m3.shape)
                             ev_model.mb_model.glac_wide_volume_annual = diag.volume_m3.values
                             ev_model.mb_model.glac_wide_area_annual = diag.area_m2.values

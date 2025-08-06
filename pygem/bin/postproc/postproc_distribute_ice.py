@@ -114,11 +114,11 @@ def run(simpath, debug=False):
         # ===== Load glacier data: area (km2), ice thickness (m), width (km) =====        
         try:
             if not glacier_rgi_table['TermType'] in [1,5] or not pygem_prms['setup']['include_tidewater']:
-                gdir = single_flowline_glacier_directory(glacier_str)
+                gdir = single_flowline_glacier_directory(glacier_str, reset=False)
                 gdir.is_tidewater = False
             else:
                 # set reset=True to overwrite non-calving directory that may already exist
-                gdir = single_flowline_glacier_directory_with_calving(glacier_str)
+                gdir = single_flowline_glacier_directory_with_calving(glacier_str, reset=False)
                 gdir.is_tidewater = True
         except Exception as err:
             print(err)
@@ -144,8 +144,8 @@ def run(simpath, debug=False):
         concat_input_filesuffix='_spinup_historical',  # concatenate with the historical spinup
         output_filesuffix=f'_pygem_{f_suffix}',  # filesuffix added to the output filename gridded_simulation.nc, if empty input_filesuffix is used
         )[0]
-        print('2D simulated ice thickness created: ', gdir.get_filepath('gridded_simulation',filesuffix=f'_pygem_{f_suffix}'))
         if debug:
+            print('2D simulated ice thickness created: ', gdir.get_filepath('gridded_simulation',filesuffix=f'_pygem_{f_suffix}'))
             plot_distributed_thickness(ds)
 
     return

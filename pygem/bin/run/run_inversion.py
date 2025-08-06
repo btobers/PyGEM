@@ -1,6 +1,5 @@
-import sys, shutil, json
+import sys, shutil, json, os
 import argparse
-import multiprocessing
 import numpy as np
 import pandas as pd
 from functools import partial
@@ -22,28 +21,7 @@ from oggm import cfg
 cfg.initialize()
 cfg.PATHS["working_dir"] = f"{pygem_prms["root"]}/{pygem_prms["oggm"]["oggm_gdir_relpath"]}"
 
-def inv(gdirs):
-    """ 
-    glacier bed inversion
-    """
-    if not isinstance(gdirs, list):
-        gdirs = [gdirs]
-    # note, PyGEMMassBalance_wrapper is passed to `tasks.apparent_mb_from_any_mb` as the `mb_model_class` so that PyGEMs mb model is used for inversion
-    workflow.execute_entity_task(tasks.apparent_mb_from_any_mb, gdirs, 
-                                mb_model_class=partial(PyGEMMassBalance_wrapper, fl_str="inversion_flowlines", option_areaconstant=True, inversion_filter=True));
-    # add debris data to flowlines
-    workflow.execute_entity_task(debris.debris_binned, gdirs, fl_str="inversion_flowlines");
-    workflow.calibrate_inversion_from_consensus(
-        gdirs,
-        apply_fs_on_mismatch=True,
-        error_on_mismatch=False,  # if you running many glaciers some might not work
-        filter_inversion_output=True,  # this partly filters the overdeepening due to
-        # the equilibrium assumption for retreating glaciers (see. Figure 5 of Maussion et al. 2019)
-        volume_m3_reference=None,  # here you could provide your own total volume estimate in m3
-    );
-
-
-def run(glac_no, per_glacier_inversion=False, ncores=1, debug=False):
+def run(glac_no, ncores=1, debug=False):
     """
     Run OGGM's bed inversion for a list of RGI glacier IDs using PyGEM's mass balance model.
     """
@@ -102,7 +80,10 @@ def run(glac_no, per_glacier_inversion=False, ncores=1, debug=False):
                             "ddfice": pygem_prms["calib"]["MCMC_params"]["ddfsnow_mu"] / pygem_prms["sim"]["params"]["ddfsnow_iceratio"],
                             "precgrad": pygem_prms["sim"]["params"]["precgrad"],
                             "tsnow_threshold": pygem_prms["sim"]["params"]["tsnow_threshold"]}
-    # PREPROCESSING
+    
+    #####################
+    ### PREPROCESSING ###
+    #####################
     task_list = [
         tasks.process_climate_data,                 # process climate_hisotrical data to gdir
         debris.debris_to_gdir,                      # process debris data to gdir
@@ -115,32 +96,81 @@ def run(glac_no, per_glacier_inversion=False, ncores=1, debug=False):
     workflow.execute_entity_task(tasks.mb_calibration_from_geodetic_mb,
                                 gdirs, informed_threestep=True, overwrite_gdir=True,
                                 );
-
-    # inversion
-    if not per_glacier_inversion:
-        inv(gdirs)
     
-    else:
-        with multiprocessing.Pool(ncores) as p:
-            p.map(inv, gdirs)
+    ##############################
+    ### INVERSION - no calving ###
+    ##############################
+    if debug:
+        print("Running initial inversion")
+    # note, PyGEMMassBalance_wrapper is passed to `tasks.apparent_mb_from_any_mb` as the `mb_model_class` so that PyGEMs mb model is used for inversion
+    workflow.execute_entity_task(tasks.apparent_mb_from_any_mb, gdirs, 
+                                mb_model_class=partial(PyGEMMassBalance_wrapper, fl_str="inversion_flowlines", option_areaconstant=True, inversion_filter=True));
+    # add debris data to flowlines
+    workflow.execute_entity_task(debris.debris_binned, gdirs, fl_str="inversion_flowlines");
 
+    ##########################
+    ### CALIBRATE GLEN'S A ###    
+    ##########################
+    # fit ice thickness to consensus estimates to find "best" Glen's A
+    if debug:
+        print("Calibrating Glen's A")
+    workflow.calibrate_inversion_from_consensus(
+        gdirs,
+        apply_fs_on_mismatch=True,
+        error_on_mismatch=False,  # if you running many glaciers some might not work
+        filter_inversion_output=True,  # this partly filters the overdeepening due to
+        # the equilibrium assumption for retreating glaciers (see. Figure 5 of Maussion et al. 2019)
+        volume_m3_reference=None,  # here you could provide your own total volume estimate in m3
+    );
+
+    ################################
+    ### INVERSION - with calving ###
+    ################################
+    cfg.PARAMS['use_kcalving_for_inversion'] = True
+    for gdir in gdirs:
+        # note, tidewater glacier inversion is not done in parallel since there's not currently a way to pass a different inversion_calving_k to each gdir
+        if not gdir.glacier_rgi_table['TermType'] in [1,5] or not pygem_prms['setup']['include_frontalablation']:
+            continue
+        if debug:
+            print(f"Running inversion for {gdir.rgi_id} with calving")
+
+        # Load quality controlled frontal ablation data 
+        fp = f"{pygem_prms['root']}/{pygem_prms['calib']['data']['frontalablation']['frontalablation_relpath']}/analysis/{pygem_prms['calib']['data']['frontalablation']['frontalablation_cal_fn']}"
+        assert os.path.exists(fp), 'Calibrated calving dataset does not exist'
+        calving_df = pd.read_csv(fp)
+        calving_rgiids = list(calving_df.RGIId)
+        
+        # Use calibrated value if individual data available
+        if gdir.rgi_id in calving_rgiids:
+            calving_idx = calving_rgiids.index(gdir.rgi_id)
+            calving_k = calving_df.loc[calving_idx, 'calving_k']
+        # Otherwise, use region's median value
+        else:
+            calving_df['O1Region'] = [int(x.split('-')[1].split('.')[0]) for x in calving_df.RGIId.values]
+            calving_df_reg = calving_df.loc[calving_df['O1Region'] == int(gdir.rgi_id[6:8]), :]
+            calving_k = np.median(calving_df_reg.calving_k)
+        
+        # set inversioncalving_k
+        cfg.PARAMS['inversion_calving_k'] = calving_k
+        if debug:
+            print(f"inversion_calving_k = {calving_k}")
+
+        tasks.find_inversion_calving_from_any_mb(gdir, 
+                                                 mb_model=PyGEMMassBalance_wrapper(gdir, 
+                                                                                   fl_str="inversion_flowlines", 
+                                                                                   option_areaconstant=True, 
+                                                                                   inversion_filter=True),
+                                                glen_a=gdir.get_diagnostics()['inversion_glen_a'], 
+                                                fs=gdir.get_diagnostics()['inversion_fs']);
+
+    ######################
+    ### POSTPROCESSING ###
+    ######################
     # finally create the dynamic flowlines
     workflow.execute_entity_task(tasks.init_present_time_glacier, gdirs);
 
     # add debris to model_flowlines
     workflow.execute_entity_task(debris.debris_binned, gdirs, fl_str="model_flowlines");
-
-    if debug:
-        glens = []
-        for gd in gdirs:
-            ga = gd.get_diagnostics()["inversion_glen_a"]
-            print(gd.rgi_id, ga)
-            glens.append(ga)
-        plt.hist(glens, bins=50)
-        plt.xlabel("Glen's A (s^-1 Pa^-3)")
-        plt.ylabel("Count")
-        plt.title("Histogram of Glen's A from Inversion")
-        plt.show()
 
 
 def main():
@@ -149,46 +179,24 @@ def main():
     # add arguments
     parser.add_argument('-rgi_region01', type=int, default=pygem_prms['setup']['rgi_region01'],
                         help='Randoph Glacier Inventory region (can take multiple, e.g. `-run_region01 1 2 3`)', nargs='+')
-    parser.add_argument('-rgi_glac_number', action='store', type=float, default=pygem_prms['setup']['glac_no'], nargs='+',
-                        help='Randoph Glacier Inventory glacier number (can take multiple)')
-    parser.add_argument('-rgi_glac_number_fn', action='store', type=str, default=None,
-                        help='filepath containing list of rgi_glac_number, helpful for running batches on spc'),
     parser.add_argument('-ncores', action='store', type=int, default=1,
                         help='number of simultaneous processes (cores) to use')
-    parser.add_argument('-per_glacier', action='store_true',
-                        help="Flag for individual per-glacier inversion (find Glen's A for each glacier)")
     parser.add_argument('-v', '--debug', action='store_true',
                         help='Flag for debugging')
     args = parser.parse_args()
     
 
-    if not args.per_glacier:
-        # RGI glacier number
-        glac_no = None
-        batches =   [modelsetup.selectglaciersrgitable(
-                                                    rgi_regionsO1=[r01], rgi_regionsO2='all',
-                                                    include_landterm=pygem_prms['setup']['include_landterm'], include_laketerm=pygem_prms['setup']['include_laketerm'],
-                                                    include_tidewater=pygem_prms['setup']['include_tidewater'], min_glac_area_km2=pygem_prms['setup']['min_glac_area_km2']
-                                                    )['rgino_str'].values.tolist() 
-                    for r01 in args.rgi_region01
-                    ]
-
-    else:
-        print("Running per-glacier inversion...")
-        if args.rgi_glac_number:
-            glac_no = args.rgi_glac_number
-            # format appropriately
-            batches = [float(g) for g in glac_no]
-            batches = [[f"{g:.5f}" if g >= 10 else f"0{g:.5f}" for g in glac_no]]
-        elif args.rgi_glac_number_fn is not None:
-            with open(args.rgi_glac_number_fn, 'r') as f:
-                batches = [(json.load(f))]
-
-        if batches is None:
-            raise ValueError('Need to specify either -rgi_glac_number or -rgi_glac_number_fn or set `glac_no` in config.py')
+    # RGI glacier number
+    batches =   [modelsetup.selectglaciersrgitable(
+                                                rgi_regionsO1=[r01], rgi_regionsO2='all',
+                                                include_landterm=pygem_prms['setup']['include_landterm'], include_laketerm=pygem_prms['setup']['include_laketerm'],
+                                                include_tidewater=pygem_prms['setup']['include_tidewater'], min_glac_area_km2=pygem_prms['setup']['min_glac_area_km2']
+                                                )['rgino_str'].values.tolist() 
+                for r01 in args.rgi_region01
+                ]
 
     # set up partial function with common arguments
-    run_partial = partial(run, per_glacier_inversion=args.per_glacier, ncores=args.ncores, debug=args.debug)
+    run_partial = partial(run, ncores=args.ncores, debug=args.debug)
 
     for i, batch in enumerate(batches):
         run_partial(batch)

@@ -206,6 +206,8 @@ class PyGEMMassBalance(MassBalanceModel):
         year_idx = self.get_year_index(year)
         # get start step for 0th month of specified year
         year_start_month_idx = 12*year_idx
+        # get stop step for specified year
+        # note, this is 1 greater than the final month which to include - python indexing will not include this month, final month to include of given year is <12*(year_idx+1)-1>
         year_stop_month_idx = 12*(year_idx+1)
 
         fl = fls[fl_id]

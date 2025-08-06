@@ -71,7 +71,7 @@ class MassRedistributionCurveModel(FlowlineModel):
         self.constantarea_years = constantarea_years
         self.spinupyears = spinupyears
         self.glac_idx_initial = [fl.thick.nonzero()[0] for fl in flowlines]
-        self.y0 = 0
+        self.y0 = y0
         self.is_tidewater = is_tidewater
         self.water_level = water_level
 
@@ -327,12 +327,19 @@ class MassRedistributionCurveModel(FlowlineModel):
         return run_ds, diag_ds
     
     
-    def updategeometry(self, year, debug=False):
+    def updategeometry(self, year, debug=True):
         """Update geometry for a given year"""
         
+        # get year index 
+        year_idx = self.mb_model.get_year_index(year)
+        # get start step for 0th month of specified year
+        year_start_month_idx = 12*year_idx
+        # get index of final month for specified year
+        year_end_month_idx = 12*(year_idx+1)-1
+
         if debug:
-            print('year:', year)
-            
+            print(f'year: {year}')
+
         # Loop over flowlines
         for fl_id, fl in enumerate(self.fls):
 
@@ -382,7 +389,7 @@ class MassRedistributionCurveModel(FlowlineModel):
                         # If frontal ablation more than bin volume, remove entire bin
                         if fa_m3 > vol_last:
                             # Record frontal ablation (m3 w.e.) in mass balance model for output
-                            self.mb_model.glac_bin_frontalablation[last_idx,int(12*(year+1)-1)] = (
+                            self.mb_model.glac_bin_frontalablation[last_idx, year_end_month_idx] = (
                                     vol_last * pygem_prms['constants']['density_ice'] / pygem_prms['constants']['density_water'])
                             # Update ice thickness and section area
                             section_t0[last_idx] = 0
@@ -396,7 +403,7 @@ class MassRedistributionCurveModel(FlowlineModel):
                             section_t0[last_idx] = section_t0[last_idx] - fa_m3 / fl.dx_meter
                             self.fls[fl_id].section = section_t0 
                             # Record frontal ablation(m3 w.e.)
-                            self.mb_model.glac_bin_frontalablation[last_idx,int(12*(year+1)-1)] = (
+                            self.mb_model.glac_bin_frontalablation[last_idx, year_end_month_idx] = (
                                     fa_m3 * pygem_prms['constants']['density_ice'] / pygem_prms['constants']['density_water'])
                             # Frontal ablation bucket now empty
                             fa_m3 = 0
@@ -422,9 +429,8 @@ class MassRedistributionCurveModel(FlowlineModel):
                     # Annual glacier mass balance [m ice s-1]
                     glac_bin_massbalclim_annual = self.mb_model.get_annual_mb(heights, fls=self.fls, fl_id=fl_id, 
                                                                               year=year, debug=False)   
-                    sec_in_year = (self.mb_model.dates_table.loc[12*year:12*(year+1)-1,'daysinmonth'].values.sum() 
+                    sec_in_year = (self.mb_model.dates_table.loc[year_start_month_idx:year_end_month_idx,'daysinmonth'].values.sum() 
                                    * 24 * 3600)
-                    
 #                    print(' volume change [m3]:', (glac_bin_massbalclim_annual * sec_in_year * 
 #                                                  (width_t0 * fl.dx_meter)).sum())
 #                    print(glac_bin_masssbalclim_annual)
@@ -452,11 +458,11 @@ class MassRedistributionCurveModel(FlowlineModel):
             year = int(year)  # required to ensure proper indexing with run_until_and_store (10/21/2020)
             glacier_area = fl.widths_m * fl.dx_meter
             glacier_area[fl.thick == 0] = 0
-            self.mb_model.glac_bin_area_annual[:,year+1] = glacier_area
-            self.mb_model.glac_bin_icethickness_annual[:,year+1] = fl.thick
-            self.mb_model.glac_bin_width_annual[:,year+1] = fl.widths_m
-            self.mb_model.glac_wide_area_annual[year+1] = glacier_area.sum()
-            self.mb_model.glac_wide_volume_annual[year+1] = (fl.section * fl.dx_meter).sum()
+            self.mb_model.glac_bin_area_annual[:,year_idx+1] = glacier_area
+            self.mb_model.glac_bin_icethickness_annual[:,year_idx+1] = fl.thick
+            self.mb_model.glac_bin_width_annual[:,year_idx+1] = fl.widths_m
+            self.mb_model.glac_wide_area_annual[year_idx+1] = glacier_area.sum()
+            self.mb_model.glac_wide_volume_annual[year_idx+1] = (fl.section * fl.dx_meter).sum()
             
             
     #%% ----- FRONTAL ABLATION -----

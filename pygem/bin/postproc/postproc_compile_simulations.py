@@ -9,6 +9,7 @@ compile individual glacier simulations to the regional level
 """
 # imports
 import os
+import re
 import glob
 import sys
 import time
@@ -53,7 +54,11 @@ rgi_reg_dict = {'all':'Global',
                 }
 
 
+def cln_underscores(s):
+    return re.sub(r'_+', '_', s)
+
 def run(args):
+    print(args)
     # unpack arguments
     reg, simpath, gcms, realizations, scenario, calibration, bias_adj, gcm_startyear, gcm_endyear, vars = args
     print(f'RGI region {reg}')
@@ -99,9 +104,9 @@ def run(args):
                 # remove the gcm from our gcm list if the desired scenario is not contained
                 gcms.remove(gcm)
                 print(f'scenario {scenario} not found for {gcm}, skipping')
-        fn = glob.glob(base_dir + gcm  + "/" + scenario  + "/stats/" + f'*{gcm}_{scenario}_{realizations[0]}_{calibration}_ba{bias_adj}_*_{gcm_startyear}_{gcm_endyear}_all.nc'.replace('__','_'))[0]
-    else:
-        fn = glob.glob(base_dir + gcm  + "/stats/" + f'*{gcm}_{calibration}_ba{bias_adj}_*_{gcm_startyear}_{gcm_endyear}_all.nc')[0]
+        fn = glob.glob(base_dir + gcm  + "/" + scenario  + "/stats/" + cln_underscores(f'*{gcm}_{scenario}_{realizations[0]}_{calibration}_ba{bias_adj}_*_{gcm_startyear}_{gcm_endyear}_all.nc'))[0]
+    elif len(gcms)==1:
+        fn = glob.glob(base_dir + gcms[0]  + "/stats/" + f'*{gcms[0]}_{calibration}_ba{bias_adj}_*_{gcm_startyear}_{gcm_endyear}_all.nc')[0]
     nsets = fn.split('/')[-1].split('_')[-4]
 
     ds_glac = xr.open_dataset(fn)
@@ -161,7 +166,7 @@ def run(args):
             ### LEVEL III ###
             for realization in realizations:
                 print(f'GCM: {gcm} {realization}')
-                fps = glob.glob(sim_dir + f'*{gcm}_{scenario}_{realization}_{calibration}_ba{bias_adj}_{nsets}_{gcm_startyear}_{gcm_endyear}_all.nc'.replace('__','_'))
+                fps = glob.glob(sim_dir + cln_underscores(f'*{gcm}_{scenario}_{realization}_{calibration}_ba{bias_adj}_{nsets}_{gcm_startyear}_{gcm_endyear}_all.nc'))
 
                 # during 0th batch, print the regional stats of glaciers and area successfully simulated for all regional glaciers for given gcm scenario
                 if nbatch==0:
@@ -194,7 +199,7 @@ def run(args):
                 for i, glacno in enumerate(glacno_list):
                     # get glacier string and file name
                     glacier_str = '{0:0.5f}'.format(float(glacno))
-                    glacno_fn = f'{sim_dir}/{glacier_str}_{gcm}_{scenario}_{realization}_{calibration}_ba{bias_adj}_{nsets}_{gcm_startyear}_{gcm_endyear}_all.nc'.replace('__','_')
+                    glacno_fn = cln_underscores(f'{sim_dir}/{glacier_str}_{gcm}_{scenario}_{realization}_{calibration}_ba{bias_adj}_{nsets}_{gcm_startyear}_{gcm_endyear}_all.nc')
                     # try to load all glaciers in region
                     try:
                         # open netcdf file
@@ -566,9 +571,9 @@ def run(args):
                 os.makedirs(vn_fp, exist_ok=True)
                 
             if realizations[0]:
-                ds_fn = f'R{str(reg).zfill(2)}_{var}_{gcms[0]}_{scenario}_Batch-{str(batch_start)}-{str(batch_end)}_{calibration}_ba{bias_adj}_{nsets}_{gcm_startyear}_{gcm_endyear}_all.nc'.replace('__','_')
+                ds_fn = cln_underscores(f'R{str(reg).zfill(2)}_{var}_{gcms[0]}_{scenario}_Batch-{str(batch_start)}-{str(batch_end)}_{calibration}_ba{bias_adj}_{nsets}_{gcm_startyear}_{gcm_endyear}_all.nc')
             else:
-                ds_fn = f'R{str(reg).zfill(2)}_{var}_{scenario}_Batch-{str(batch_start)}-{str(batch_end)}_{calibration}_ba{bias_adj}_{nsets}_{gcm_startyear}_{gcm_endyear}_all.nc'.replace('__','_')
+                ds_fn = cln_underscores(f'R{str(reg).zfill(2)}_{var}_{scenario}_Batch-{str(batch_start)}-{str(batch_end)}_{calibration}_ba{bias_adj}_{nsets}_{gcm_startyear}_{gcm_endyear}_all.nc')
 
             ds.to_netcdf(vn_fp + ds_fn)
 
@@ -586,9 +591,9 @@ def run(args):
             fn_merge_list_start = []
 
             if realizations[0]:
-                fn_merge_list = glob.glob(f'{vn_fp}/R{str(reg).zfill(2)}_{vn}_{gcms[0]}_{scenario}_Batch-*_{calibration}_ba{bias_adj}_{nsets}_{gcm_startyear}_{gcm_endyear}_all.nc'.replace('__','_'))
+                fn_merge_list = glob.glob(cln_underscores(f'{vn_fp}/R{str(reg).zfill(2)}_{vn}_{gcms[0]}_{scenario}_Batch-*_{calibration}_ba{bias_adj}_{nsets}_{gcm_startyear}_{gcm_endyear}_all.nc'))
             else:
-                fn_merge_list = glob.glob(f'{vn_fp}/R{str(reg).zfill(2)}_{vn}_{scenario}_Batch-*_{calibration}_ba{bias_adj}_{nsets}_{gcm_startyear}_{gcm_endyear}_all.nc'.replace('__','_'))
+                fn_merge_list = glob.glob(cln_underscores(f'{vn_fp}/R{str(reg).zfill(2)}_{vn}_{scenario}_Batch-*_{calibration}_ba{bias_adj}_{nsets}_{gcm_startyear}_{gcm_endyear}_all.nc'))
             fn_merge_list_start = [int(f.split('-')[-2]) for f in fn_merge_list]
         
             if len(fn_merge_list) > 0:
@@ -677,6 +682,8 @@ def main():
         scenarios = ['']
         if set(gcms) - set(['ERA5', 'ERA-Interim', 'COAWST']):
             raise ValueError(f'Must specify a scenario for future GCM runs\nGCMs: {gcms}\nscenarios: {scenarios}')
+        # ensure bias_adjust is 0
+        bias_adj = 0
 
     if realizations is None:
         realizations = ['']

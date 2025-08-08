@@ -150,7 +150,9 @@ def run(glac_no, ncores=1, debug=False):
             calving_df_reg = calving_df.loc[calving_df['O1Region'] == int(gdir.rgi_id[6:8]), :]
             calving_k = np.median(calving_df_reg.calving_k)
         
-        # set inversioncalving_k
+        # increase calving line for inversion so that later spinup will work
+        cfg.PARAMS['calving_line_extension'] = 120
+        # set inversion_calving_k
         cfg.PARAMS['inversion_calving_k'] = calving_k
         if debug:
             print(f"inversion_calving_k = {calving_k}")

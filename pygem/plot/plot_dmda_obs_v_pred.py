@@ -78,14 +78,14 @@ def main(jsonfp, outfp='', outdir=None):
                          obs[:,t]*rho-sigma_obs[:,t]*rho,
                          obs[:,t]*rho+sigma_obs[:,t]*rho,
                          color='k',alpha=.125)
-        ax[t].plot(cum_area, obs[:,t]*rho, 'k', label='Obs.')
+        ax[t].plot(cum_area, obs[:,t]*rho, 'k-', marker='.', label='Obs.')
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore')
             ax[t].fill_between(cum_area,
                             np.nanpercentile(stack, 5, axis=0),
                             np.nanpercentile(stack, 95, axis=0),
                             color='r', alpha=.25)
-            ax[t].plot(cum_area, np.nanmedian(stack,axis=0), 'r', label='Pred.')
+            ax[t].plot(cum_area, np.nanmedian(stack,axis=0), 'r-', marker='.', label='Pred.')
 
         # for r in stack:
         #     axb.plot(bin_z, r, 'r', alpha=.0125)

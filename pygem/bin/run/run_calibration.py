@@ -193,13 +193,14 @@ def get_dmda(gdir, modelprms, glacier_rgi_table, fls=None, diff_inds_map=None, b
     mbmod = PyGEMMassBalance(gdir, modelprms, glacier_rgi_table,
                                 fls=gdir.read_pickle("model_flowlines", filesuffix=f"_{y0}"))
     # glacier dynamics model    
-    if gdir.is_tidewater:
+    if gdir.is_tidewater and pygem_prms['setup']['include_frontalablation']:
         ev_model = FluxBasedModel(gdir.read_pickle("model_flowlines", filesuffix=f"_{y0}"),
                                 y0=y0, mb_model=mbmod, 
                                 glen_a=gdir.get_diagnostics()['inversion_glen_a'],
                                 fs = gdir.get_diagnostics()['inversion_fs'],                                
                                 is_tidewater=gdir.is_tidewater,
-                                water_level=water_level)
+                                water_level=water_level,
+                                do_kcalving=pygem_prms['setup']['include_frontalablation'])
     else:
         ev_model = flowline.SemiImplicitModel(gdir.read_pickle("model_flowlines", filesuffix=f"_{y0}"),
                                             y0=y0, mb_model=mbmod,
@@ -210,9 +211,35 @@ def get_dmda(gdir, modelprms, glacier_rgi_table, fls=None, diff_inds_map=None, b
     
     try:
         # run glacier dynamics model forward
-        _, ds = ev_model.run_until_and_store(y1+1, fl_diag_path=True)
+        diag, ds = ev_model.run_until_and_store(y1+1, fl_diag_path=True)
         with np.errstate(invalid='ignore'):
-            mb_mwea = mbmod.glac_wide_massbaltotal[gdir.mbdata['t1_idx']:gdir.mbdata['t2_idx']+1].sum() / mbmod.glac_wide_area_annual[0] / gdir.mbdata['nyears']
+            # record frontal ablation for tidewater glaciers and update total mass balance
+            if gdir.is_tidewater and pygem_prms['setup']['include_frontalablation']:
+                # glacier-wide frontal ablation (m3 w.e.)
+                # - note: diag.calving_m3 is cumulative calving, convert to annual calving
+                calving_m3we_annual = ((diag.calving_m3.values[1:] - diag.calving_m3.values[0:-1]) * 
+                                        pygem_prms['constants']['density_ice'] / pygem_prms['constants']['density_water'])
+                # record each year's frontal ablation in m3 w.e.
+                for n in np.arange(calving_m3we_annual.shape[0]):
+                    ev_model.mb_model.glac_wide_frontalablation[12*n+11] = calving_m3we_annual[n]
+
+                # Add mass lost from frontal ablation to Glacier-wide total mass balance (m3 w.e.)
+                ev_model.mb_model.glac_wide_massbaltotal = (
+                        ev_model.mb_model.glac_wide_massbaltotal + ev_model.mb_model.glac_wide_frontalablation)
+                
+                if debug:
+                    print(f'avg frontal ablation [Gta]: {np.round(
+                                                        mbmod.glac_wide_frontalablation[gdir.mbdata['t1_idx']:gdir.mbdata['t2_idx']+1].sum() / \
+                                                        1e9 / gdir.mbdata['nyears'],4)
+                                                        }')
+            
+            mb_mwea = mbmod.glac_wide_massbaltotal[gdir.mbdata['t1_idx']:gdir.mbdata['t2_idx']+1].sum() / \
+                mbmod.glac_wide_area_annual[0] / \
+                gdir.mbdata['nyears']
+            if debug:
+                print('mb mwea:', 
+                            np.round(mb_mwea,4))
+
 
     # if there is an issue evaluating the dynamics model for a given parameter set in MCMC calibration, 
     # return -inf for mb_mwea and binned_dh, so MCMC calibration won't accept given parameters
@@ -230,9 +257,6 @@ def get_dmda(gdir, modelprms, glacier_rgi_table, fls=None, diff_inds_map=None, b
     dotb_monthly = mbmod.glac_bin_massbalclim # climatic mass balance [m w.e.] per month
     # convert to m ice
     dotb_monthly = dotb_monthly * (pygem_prms['constants']['density_water'] / pygem_prms['constants']['density_ice'])
-
-    # obtain annual mass balance rate, sum monthly for each year
-    dotb_annual = dotb_monthly.reshape(dotb_monthly.shape[0], dotb_monthly.shape[1]//12,-1).sum(2) # climatic mass balance [m ice a^-1]
 
     ### to get monthly thickness and mass we require monthly flux divergence ###
     # we'll assume the flux divergence is constant througohut the year (is this a good assumption?)
@@ -696,7 +720,30 @@ def run(list_packed_vars):
                 index_map = {value: idx for idx, value in enumerate(gdir.dates_table.date.tolist())}
                 # map each element in the gdir.oib_diffs['dates'] to its index in gdir.dates_table - these inds will be used to difference model results in MCMC calib
                 gdir.oib_diffs['model_inds_map'] = [(index_map[val1], index_map[val2]) for val1, val2 in gdir.oib_diffs['dates']]
-
+                # if calibrating against binned elevation change, need to load calibrated calving_k values for tidewater glaciers
+                if gdir.is_tidewater and pygem_prms['setup']['include_frontalablation']:
+                    # Load quality controlled frontal ablation data 
+                    fp = f"{pygem_prms['root']}/{pygem_prms['calib']['data']['frontalablation']['frontalablation_relpath']}/analysis/{pygem_prms['calib']['data']['frontalablation']['frontalablation_cal_fn']}"
+                    assert os.path.exists(fp), 'Calibrated calving dataset does not exist'
+                    calving_df = pd.read_csv(fp)
+                    calving_rgiids = list(calving_df.RGIId)
+                    
+                    # Use calibrated value if individual data available
+                    if gdir.rgi_id in calving_rgiids:
+                        calving_idx = calving_rgiids.index(gdir.rgi_id)
+                        calving_k = calving_df.loc[calving_idx, 'calving_k']
+                    # Otherwise, use region's median value
+                    else:
+                        calving_df['O1Region'] = [int(x.split('-')[1].split('.')[0]) for x in calving_df.RGIId.values]
+                        calving_df_reg = calving_df.loc[calving_df['O1Region'] == int(gdir.rgi_id[6:8]), :]
+                        calving_k = np.median(calving_df_reg.calving_k)
+                    calving_k = 5
+                    # set calving_k in config
+                    cfg.PARAMS['use_kcalving_for_run'] = True
+                    cfg.PARAMS['calving_k'] = calving_k
+                    cfg.PARAMS['cfl_min_dt'] = .0001
+                    if debug:
+                        print(f"calving_k = {calving_k}")
             except Exception as err:
                 if debug:
                     print(f'Error loading OIB data: {err}')
@@ -1559,11 +1606,14 @@ def run(list_packed_vars):
                                 show=False
                             else:
                                 show=True
-
-                            mcmc.plot_chain(m_primes, m_chain, obs[0], ar, glacier_str, show=show, fpath=f'{fp}/{glacier_str}-chain{n_chain}.png')
-                            for i in pred_chain.keys():
-                                mcmc.plot_resid_hist(obs[i], pred_chain[i], glacier_str, show=show, fpath=f'{fp}/{glacier_str}-chain{n_chain}-residuals-{i}.png')
-
+                            try:
+                                mcmc.plot_chain(m_primes, m_chain, obs[0], ar, glacier_str, show=show, fpath=f'{fp}/{glacier_str}-chain{n_chain}.png')
+                                for i in pred_chain.keys():
+                                    mcmc.plot_resid_hist(obs[i], pred_chain[i], glacier_str, show=show, fpath=f'{fp}/{glacier_str}-chain{n_chain}-residuals-{i}.png')
+                            except Exception as e:
+                                if debug:
+                                    print(f"Error plotting chain {n_chain}: {e}")
+                        
                         # Store data from model to be exported
                         chain_str = 'chain_' + str(n_chain)
                         modelprms_export['tbias'][chain_str] = m_chain[:,0].tolist()

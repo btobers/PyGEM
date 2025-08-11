@@ -272,7 +272,7 @@ def main():
     
     elif args.binned_simdir:
         # get list of sims
-        simpath = glob.glob(args.binned_simdir+'*.nc')
+        simpath = glob.glob(args.binned_simdir+'/*.nc')
     if simpath:
         # number of cores for parallel processing
         if args.ncores > 1:

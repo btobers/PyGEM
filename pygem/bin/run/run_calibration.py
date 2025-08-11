@@ -737,7 +737,7 @@ def run(list_packed_vars):
                         calving_df['O1Region'] = [int(x.split('-')[1].split('.')[0]) for x in calving_df.RGIId.values]
                         calving_df_reg = calving_df.loc[calving_df['O1Region'] == int(gdir.rgi_id[6:8]), :]
                         calving_k = np.median(calving_df_reg.calving_k)
-                    calving_k = 5
+
                     # set calving_k in config
                     cfg.PARAMS['use_kcalving_for_run'] = True
                     cfg.PARAMS['calving_k'] = calving_k

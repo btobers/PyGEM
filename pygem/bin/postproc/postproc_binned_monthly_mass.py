@@ -42,7 +42,7 @@ def getparser():
     return parser
 
 
-def get_binned_monthly(dotb_monthly, m_annual, h_annual):
+def get_binned_monthly(dotb_monthly, m_annual, h_annual, flux_div_annual):
     """
     funciton to calculate the monthly binned ice thickness and mass
     from annual climatic mass balance and annual ice thickness products
@@ -53,8 +53,7 @@ def get_binned_monthly(dotb_monthly, m_annual, h_annual):
     here, monthly thickness and mass is determined assuming 
     the flux divergence is constant throughout the year.
     
-    annual flux divergence is first estimated by combining the annual binned change in ice 
-    thickness and the annual binned mass balance. then, assume flux divergence is constant 
+    monthly flux divergence is obtained by assuming flux divergence is constant 
     throughout the year (divide annual by 12 to get monthly flux divergence).
 
     monthly binned flux divergence can then be combined with 
@@ -67,10 +66,13 @@ def get_binned_monthly(dotb_monthly, m_annual, h_annual):
         ndarray containing the climatic mass balance for each model month computed by PyGEM
         shape : [#glac, #elevbins, #months]
     m_annual : float
-        ndarray containing the average (or median) binned ice mass computed by PyGEM
+        ndarray containing binned ice mass computed at the start of the model year
         shape : [#glac, #elevbins, #years]
     h_annual : float
-        ndarray containing the average (or median) binned ice thickness at computed by PyGEM
+        ndarray containing the binned ice thickness at the start of the model year
+        shape : [#glac, #elevbins, #years]
+    flux_div_annual : float
+        ndarray containing the annual flux divergence (each index represents the previous years flux divergence)
         shape : [#glac, #elevbins, #years]
 
     Returns
@@ -83,23 +85,17 @@ def get_binned_monthly(dotb_monthly, m_annual, h_annual):
         shape : [#glac, #elevbins, #years]
     """
     ### get monthly ice thickness ###
+    # set any < 0 thickness to nan
+    h_annual[h_annual<=0] = np.nan
+
     # convert mass balance from m w.e. yr^-1 to m ice yr^-1
     dotb_monthly = dotb_monthly * (pygem_prms['constants']['density_water'] / pygem_prms['constants']['density_ice'])
     assert dotb_monthly.shape[2] % 12 == 0, "Number of months is not a multiple of 12!"
 
-    # obtain annual mass balance rate, sum monthly for each year
-    dotb_annual = dotb_monthly.reshape(dotb_monthly.shape[0], dotb_monthly.shape[1], -1, 12).sum(axis=-1)  # climatic mass balance [m ice a^-1]
-
-    # compute the thickness change per year
-    delta_h_annual = np.diff(h_annual, axis=-1)  # [m ice a^-1] (nbins, nyears-1)
-
-    # compute flux divergence for each bin
-    flux_div_annual = dotb_annual - delta_h_annual  # [m ice a^-1]
-
     ### to get monthly thickness and mass we require monthly flux divergence ###
     # we'll assume the flux divergence is constant througohut the year (is this a good assumption?)
     # ie. take annual values and divide by 12 - use numpy repeat to repeat values across 12 months
-    flux_div_monthly = np.repeat(flux_div_annual / 12, 12, axis=-1)
+    flux_div_monthly = np.repeat(flux_div_annual[:,:,1:] / 12, 12, axis=-1)
 
     # get monthly binned change in thickness
     delta_h_monthly = dotb_monthly - flux_div_monthly # [m ice per month]
@@ -244,7 +240,8 @@ def run(simpath):
         h_monthly, m_spec_monthly, m_monthly = get_binned_monthly(
                                                     binned_ds.bin_massbalclim_monthly.values, 
                                                     binned_ds.bin_mass_annual.values,
-                                                    binned_ds.bin_thick_annual.values
+                                                    binned_ds.bin_thick_annual.values,
+                                                    binned_ds.bin_flux_divergence_annual.values
                                                     )
 
         # update dataset to add monthly mass change

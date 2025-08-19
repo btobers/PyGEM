@@ -573,6 +573,13 @@ class binned_stats(single_glacier):
                                                         'units': 'm',
                                                         'temporal_resolution': 'annual',
                                                         'comment': 'binned ice thickness at start of the year'}
+        self.output_coords_dict['bin_flux_divergence_annual'] = (
+                collections.OrderedDict([('glac', self.glac_values), ('bin', self.bin_values), ('year', self.year_values)]))
+        self.output_attrs_dict['bin_flux_divergence_annual'] = {
+                                                        'long_name': 'binned flux divergence',
+                                                        'units': 'm',
+                                                        'temporal_resolution': 'annual',
+                                                        'comment': 'previous years flux divergence'}
         self.output_coords_dict['bin_massbalclim_annual'] = (
                 collections.OrderedDict([('glac', self.glac_values), ('bin', self.bin_values), ('year', self.year_values)]))
         self.output_attrs_dict['bin_massbalclim_annual'] = {

@@ -15,7 +15,7 @@ from pygem.massbalance import PyGEMMassBalance_wrapper
 #from pygem.glacierdynamics import MassRedistributionCurveModel
 from pygem.oggm_compat import update_cfg
 import pygem.pygem_modelsetup as modelsetup
-from pygem.shop import debris
+from pygem.shop import debris, mbdata
 from oggm import tasks, workflow
 from oggm import cfg
 cfg.initialize()
@@ -85,13 +85,14 @@ def run(glac_no, ncores=1, debug=False):
     ### PREPROCESSING ###
     #####################
     task_list = [
-        tasks.process_climate_data,                 # process climate_hisotrical data to gdir
-        debris.debris_to_gdir,                      # process debris data to gdir
-        debris.debris_binned                        # add debris to inversion flowlines
+        tasks.process_climate_data,  # process climate_hisotrical data to gdir
+        mbdata.mb_df_to_gdir,  # process mass balance calibration data to gdir
+        debris.debris_to_gdir,  # process debris data to gdir
+        debris.debris_binned,  # add debris to inversion flowlines
     ]
     for task in task_list:
         workflow.execute_entity_task(task, gdirs);
-
+    
     # process mb_calib data from geodetic mass balance
     workflow.execute_entity_task(tasks.mb_calibration_from_geodetic_mb,
                                 gdirs, informed_threestep=True, overwrite_gdir=True,

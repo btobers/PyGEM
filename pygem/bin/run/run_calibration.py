@@ -176,7 +176,7 @@ def mb_mwea_calc(gdir, modelprms, glacier_rgi_table, fls=None, t1=None, t2=None,
         return mb_mwea
 
 
-def get_dmda(gdir, modelprms, glacier_rgi_table, fls=None, diff_inds_map=None, bin_edges=None, bin_centers=None, debug=False):
+def get_dmda(gdir, modelprms, glacier_rgi_table, fls=None, diff_inds_map=None, bin_edges=None, bin_centers=None, surface_refyear=None, debug=False):
     """
     For a given set of model parameters, run the ice thickness inversion and mass balance model to get binned annual ice thickness change
     Convert to monthly thickness by assuming that the flux divergence is constant throughout the year
@@ -184,6 +184,8 @@ def get_dmda(gdir, modelprms, glacier_rgi_table, fls=None, diff_inds_map=None, b
     nyears = int(gdir.dates_table.shape[0]/12) # number of years from dates table
     y0 = gdir.dates_table.year.min()
     y1 = gdir.dates_table.year.max()
+    surface_refyear = y0 if surface_refyear is None else surface_refyear
+
     # Check that water level is within given bounds
     cls = gdir.read_pickle('inversion_input')[-1]
     th = cls['hgt'][-1]
@@ -240,7 +242,6 @@ def get_dmda(gdir, modelprms, glacier_rgi_table, fls=None, diff_inds_map=None, b
                 print('mb mwea:', 
                             np.round(mb_mwea,4))
 
-
     # if there is an issue evaluating the dynamics model for a given parameter set in MCMC calibration, 
     # return -inf for mb_mwea and binned_dh, so MCMC calibration won't accept given parameters
     except RuntimeError:
@@ -273,10 +274,13 @@ def get_dmda(gdir, modelprms, glacier_rgi_table, fls=None, diff_inds_map=None, b
     # convert to mass per unit area
     m_monthly_spec = h_monthly * pygem_prms['constants']['density_ice']
 
+    # get surface height at the specified reference year
+    ref_surface_h = ds[0].bed_h.values + ds[0].thickness_m.sel(time=surface_refyear).values
+
     # aggregate model bin thicknesses as desired
     with warnings.catch_warnings():
         warnings.filterwarnings('ignore')
-        m_monthly_spec = np.column_stack([stats.binned_statistic(x=fls[0].surface_h, values=x, statistic=np.nanmean, bins=bin_edges)[0] for x in m_monthly_spec.T])
+        m_monthly_spec = np.column_stack([stats.binned_statistic(x=ref_surface_h, values=x, statistic=np.nanmean, bins=bin_edges)[0] for x in m_monthly_spec.T])
 
     # interpolate over any empty bins
     m_monthly_spec_ = np.column_stack([
@@ -711,6 +715,8 @@ def run(list_packed_vars):
                 gdir.oib_diffs['bin_edges'] = icebridge._get_edges()
                 gdir.oib_diffs['bin_centers'] = icebridge._get_centers()
                 gdir.oib_diffs['bin_area'] = icebridge._get_area()
+                # store year of surface reference year
+                gdir.oib_diffs['surface_refyear'] = 2013
                 # store ela info
                 gdir.ela = {
                                     'yr': yrs,
@@ -1481,7 +1487,8 @@ def run(list_packed_vars):
                                 fls,
                                 gdir.oib_diffs['model_inds_map'], 
                                 gdir.oib_diffs['bin_edges'],
-                                gdir.oib_diffs['bin_centers'])
+                                gdir.oib_diffs['bin_centers'],
+                                gdir.oib_diffs['surface_refyear'])
                     # append deltah obs and undto obs list
                     obs.append((torch.tensor(gdir.oib_diffs['dh']),torch.tensor(gdir.oib_diffs['sigma'])))
                 # if there are more observations to calibrate against, simply append a tuple of (obs, variance) to obs list

@@ -65,17 +65,32 @@ def run(glacno_list, spinup_start_yr, **kwargs):
                                     "lr": lr[i,:]}
             gd.dates_table = dt
 
-            # get modelprms from regional priors
-            priors_idx = np.where((priors_df.O1Region == gd.glacier_rgi_table["O1Region"]) & 
-                                                        (priors_df.O2Region == gd.glacier_rgi_table["O2Region"]))[0][0]
-            tbias_mu = float(priors_df.loc[priors_idx, "tbias_mean"])
-            kp_mu = float(priors_df.loc[priors_idx, "kp_mean"])
-            gd.modelprms = {"kp": kp_mu,
-                                "tbias": tbias_mu,
-                                "ddfsnow": pygem_prms["calib"]["MCMC_params"]["ddfsnow_mu"],
-                                "ddfice": pygem_prms["calib"]["MCMC_params"]["ddfsnow_mu"] / pygem_prms["sim"]["params"]["ddfsnow_iceratio"],
-                                "precgrad": pygem_prms["sim"]["params"]["precgrad"],
-                                "tsnow_threshold": pygem_prms["sim"]["params"]["tsnow_threshold"]}
+            # get model params from emulator calibration
+            modelprms_fn = glacier_str + '-modelprms_dict.json'
+            modelprms_fp = (pygem_prms['root'] + '/Output/calibration/' + glacier_str.split('.')[0].zfill(2) 
+                            + '/') + modelprms_fn
+            with open(modelprms_fp, 'r') as f:
+                modelprms_dict = json.load(f)
+            
+            modelprms_all = modelprms_dict['emulator']
+            gd.modelprms = {'kp': modelprms_all['kp'][0],
+                        'tbias': modelprms_all['tbias'][0],
+                        'ddfsnow': modelprms_all['ddfsnow'][0],
+                        'ddfice': modelprms_all['ddfice'][0],
+                        'tsnow_threshold': modelprms_all['tsnow_threshold'][0],
+                        'precgrad': modelprms_all['precgrad'][0]}
+
+            # # get modelprms from regional priors
+            # priors_idx = np.where((priors_df.O1Region == gd.glacier_rgi_table["O1Region"]) & 
+            #                                             (priors_df.O2Region == gd.glacier_rgi_table["O2Region"]))[0][0]
+            # tbias_mu = float(priors_df.loc[priors_idx, "tbias_mean"])
+            # kp_mu = float(priors_df.loc[priors_idx, "kp_mean"])
+            # gd.modelprms = {"kp": kp_mu,
+            #                     "tbias": tbias_mu,
+            #                     "ddfsnow": pygem_prms["calib"]["MCMC_params"]["ddfsnow_mu"],
+            #                     "ddfice": pygem_prms["calib"]["MCMC_params"]["ddfsnow_mu"] / pygem_prms["sim"]["params"]["ddfsnow_iceratio"],
+            #                     "precgrad": pygem_prms["sim"]["params"]["precgrad"],
+            #                     "tsnow_threshold": pygem_prms["sim"]["params"]["tsnow_threshold"]}
 
             # update cfg.PARAMS
             update_cfg({"continue_on_error" : True}, "PARAMS")

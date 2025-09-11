@@ -176,7 +176,7 @@ def mb_mwea_calc(gdir, modelprms, glacier_rgi_table, fls=None, t1=None, t2=None,
         return mb_mwea
 
 
-def get_dmda(gdir, modelprms, glacier_rgi_table, fls=None, diff_inds_map=None, bin_edges=None, bin_centers=None, surface_refyear=None, debug=False):
+def get_dmda(gdir, modelprms, glacier_rgi_table, fls, diff_inds_map=None, bin_edges=None, bin_centers=None, surface_refyear=None, debug=False):
     """
     For a given set of model parameters, run the ice thickness inversion and mass balance model to get binned annual ice thickness change
     Convert to monthly thickness by assuming that the flux divergence is constant throughout the year
@@ -192,11 +192,10 @@ def get_dmda(gdir, modelprms, glacier_rgi_table, fls=None, diff_inds_map=None, b
     vmin, vmax = cfg.PARAMS['free_board_marine_terminating']
     water_level = utils.clip_scalar(0, th - vmax, th - vmin) 
     # mass balance model with evolving area
-    mbmod = PyGEMMassBalance(gdir, modelprms, glacier_rgi_table,
-                                fls=gdir.read_pickle("model_flowlines", filesuffix=f"_{y0}"))
+    mbmod = PyGEMMassBalance(gdir, modelprms, glacier_rgi_table, fls=fls)
     # glacier dynamics model    
     if gdir.is_tidewater and pygem_prms['setup']['include_frontalablation']:
-        ev_model = FluxBasedModel(gdir.read_pickle("model_flowlines", filesuffix=f"_{y0}"),
+        ev_model = FluxBasedModel(fls,
                                 y0=y0, mb_model=mbmod, 
                                 glen_a=gdir.get_diagnostics()['inversion_glen_a'],
                                 fs = gdir.get_diagnostics()['inversion_fs'],                                
@@ -204,7 +203,7 @@ def get_dmda(gdir, modelprms, glacier_rgi_table, fls=None, diff_inds_map=None, b
                                 water_level=water_level,
                                 do_kcalving=pygem_prms['setup']['include_frontalablation'])
     else:
-        ev_model = flowline.SemiImplicitModel(gdir.read_pickle("model_flowlines", filesuffix=f"_{y0}"),
+        ev_model = flowline.SemiImplicitModel(fls,
                                             y0=y0, mb_model=mbmod,
                                             glen_a=gdir.get_diagnostics()['inversion_glen_a'],
                                             fs = gdir.get_diagnostics()['inversion_fs'],

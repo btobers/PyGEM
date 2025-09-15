@@ -680,8 +680,7 @@ def run(list_packed_vars):
 
         # oib deltah data
         if args.oib:
-            # try: 
-            for f in ['b']:
+            try: 
                 icebridge = oib.oib(rgi6id=glacier_str)
                 icebridge._rgi6torgi7id(debug=debug)
                 if icebridge.rgi7id is None:
@@ -752,10 +751,10 @@ def run(list_packed_vars):
                     cfg.PARAMS['cfl_min_dt'] = .0001
                     if debug:
                         print(f"calving_k = {calving_k}")
-            # except Exception as err:
-            #     if debug:
-            #         print(f'Error loading OIB data: {err}')
-            #         continue
+            except Exception as err:
+                if debug:
+                    print(f'Error loading OIB data: {err}')
+                    continue
         
         # spinup
         if args.spinup:

@@ -680,7 +680,8 @@ def run(list_packed_vars):
 
         # oib deltah data
         if args.oib:
-            try:
+            # try: 
+            for f in ['b']:
                 icebridge = oib.oib(rgi6id=glacier_str)
                 icebridge._rgi6torgi7id(debug=debug)
                 if icebridge.rgi7id is None:
@@ -706,7 +707,7 @@ def run(list_packed_vars):
                 yrs = list(range(args.ref_startyear, min(args.ref_endyear, 2019) + 1))
                 ela = tasks.compute_ela(gdir, years=yrs)
                 # apply surge mask
-                icebridge._surge_mask(ela=ela, inplace=True)
+                icebridge._surge_mask(ela=ela.values.min(), threshold=5, inplace=True)
                 # return icebridge.dbl_diffs and attach to gdir
                 gdir.oib_diffs = icebridge._get_dbldiffs()
                 # ensure data to calibrate against
@@ -751,10 +752,10 @@ def run(list_packed_vars):
                     cfg.PARAMS['cfl_min_dt'] = .0001
                     if debug:
                         print(f"calving_k = {calving_k}")
-            except Exception as err:
-                if debug:
-                    print(f'Error loading OIB data: {err}')
-                    continue
+            # except Exception as err:
+            #     if debug:
+            #         print(f'Error loading OIB data: {err}')
+            #         continue
         
         # spinup
         if args.spinup:

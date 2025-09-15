@@ -31,6 +31,9 @@ def run(glac_no, ncores=1, debug=False):
         update_cfg({"use_multiprocessing" : True}, "PARAMS")
         update_cfg({"mp_processes" : ncores}, "PARAMS")
 
+    if not isinstance(glac_no,list):
+        glac_no = [glac_no]
+
     main_glac_rgi = modelsetup.selectglaciersrgitable(glac_no=glac_no)
     # get list of RGIId's for each rgitable being run
     rgiids = main_glac_rgi["RGIId"].tolist()
@@ -105,7 +108,7 @@ def run(glac_no, ncores=1, debug=False):
         print("Running initial inversion")
     # note, PyGEMMassBalance_wrapper is passed to `tasks.apparent_mb_from_any_mb` as the `mb_model_class` so that PyGEMs mb model is used for inversion
     workflow.execute_entity_task(tasks.apparent_mb_from_any_mb, gdirs, 
-                                mb_model_class=partial(PyGEMMassBalance_wrapper, fl_str="inversion_flowlines", option_areaconstant=True, inversion_filter=True));
+                                mb_model_class=partial(PyGEMMassBalance_wrapper, fl_str="inversion_flowlines", option_areaconstant=True));
     # add debris data to flowlines
     workflow.execute_entity_task(debris.debris_binned, gdirs, fl_str="inversion_flowlines");
 
@@ -161,8 +164,7 @@ def run(glac_no, ncores=1, debug=False):
         tasks.find_inversion_calving_from_any_mb(gdir, 
                                                  mb_model=PyGEMMassBalance_wrapper(gdir, 
                                                                                    fl_str="inversion_flowlines", 
-                                                                                   option_areaconstant=True, 
-                                                                                   inversion_filter=True),
+                                                                                   option_areaconstant=True), 
                                                 glen_a=gdir.get_diagnostics()['inversion_glen_a'], 
                                                 fs=gdir.get_diagnostics()['inversion_fs']);
 
@@ -182,6 +184,12 @@ def main():
     # add arguments
     parser.add_argument('-rgi_region01', type=int, default=pygem_prms['setup']['rgi_region01'],
                         help='Randoph Glacier Inventory region (can take multiple, e.g. `-run_region01 1 2 3`)', nargs='+')
+    parser.add_argument('-rgi_region02', type=str, default=pygem_prms['setup']['rgi_region02'], nargs='+',
+                        help='Randoph Glacier Inventory subregion (either `all` or multiple spaced integers,  e.g. `-run_region02 1 2 3`)')
+    parser.add_argument('-rgi_glac_number', action='store', type=float, default=pygem_prms['setup']['glac_no'], nargs='+',
+                        help='Randoph Glacier Inventory glacier number (can take multiple)')
+    parser.add_argument('-rgi_glac_number_fn', action='store', type=str, default=None,
+                        help='filepath containing list of rgi_glac_number, helpful for running batches on spc'),
     parser.add_argument('-ncores', action='store', type=int, default=1,
                         help='number of simultaneous processes (cores) to use')
     parser.add_argument('-v', '--debug', action='store_true',
@@ -190,13 +198,23 @@ def main():
     
 
     # RGI glacier number
-    batches =   [modelsetup.selectglaciersrgitable(
-                                                rgi_regionsO1=[r01], rgi_regionsO2='all',
-                                                include_landterm=pygem_prms['setup']['include_landterm'], include_laketerm=pygem_prms['setup']['include_laketerm'],
-                                                include_tidewater=pygem_prms['setup']['include_tidewater'], min_glac_area_km2=pygem_prms['setup']['min_glac_area_km2']
-                                                )['rgino_str'].values.tolist() 
-                for r01 in args.rgi_region01
-                ]
+    batches = None
+    if args.rgi_glac_number:
+        glac_no = args.rgi_glac_number
+        # format appropriately
+        glac_no = [float(g) for g in glac_no]
+        batches = [f"{g:.5f}" if g >= 10 else f"0{g:.5f}" for g in glac_no]
+    elif args.rgi_glac_number_fn is not None:
+        with open(args.rgi_glac_number_fn, 'r') as f:
+            batches = json.load(f)
+    else:
+        batches =   [modelsetup.selectglaciersrgitable(
+                                                    rgi_regionsO1=[r01], rgi_regionsO2='all',
+                                                    include_landterm=pygem_prms['setup']['include_landterm'], include_laketerm=pygem_prms['setup']['include_laketerm'],
+                                                    include_tidewater=pygem_prms['setup']['include_tidewater'], min_glac_area_km2=pygem_prms['setup']['min_glac_area_km2']
+                                                    )['rgino_str'].values.tolist() 
+                    for r01 in args.rgi_region01
+                    ]
 
     # set up partial function with common arguments
     run_partial = partial(run, ncores=args.ncores, debug=args.debug)

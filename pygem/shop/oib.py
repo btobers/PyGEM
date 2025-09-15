@@ -39,6 +39,8 @@ class oib:
         return self.oib_diffs
     def _set_diffs(self, diffs_dict):
         self.oib_diffs = dict(sorted(diffs_dict.items()))
+    def _set_dbldiffs(self, diffs_dict):
+        self.dbl_diffs = diffs_dict
     def _get_dbldiffs(self):
         return self.dbl_diffs
     def _set_centers(self, centers):
@@ -204,8 +206,57 @@ class oib:
             self._set_diffs(oib_diffs_masked)
         else:
             return dict(sorted(oib_diffs_masked.items()))
+        
+    def _get_dhda(self):
+        """
+        compute thinning rate per year
+        """
+        # get nyears between surveys for averaging - round to nearest year
+        self.dbl_diffs['nyears'] = np.array([round((t[1]-t[0]).total_seconds() / (365.25 * 24 * 60 * 60)) for t in self.dbl_diffs['dates']]).astype(float)
+        # mask any diffs where nyears < 1 (shouldn't ever be the case anyways, but just in case)
+        self.dbl_diffs['nyears'][self.dbl_diffs['nyears'] < 1] = np.nan
+        # get annual averages
+        self.dbl_diffs['dhda'] = self.dbl_diffs['dh'] / self.dbl_diffs['nyears'] 
 
 
+    def _surge_mask(self, ela=0, threshold=10, inplace=False):
+        """
+        mask surges based on some maximum thinning rate threshold below the ELA.
+        this simply masks an entire survey if the maximum thinning rate below the ELA is above the threshold value.
+
+        parameters:
+        - ela: float, equilibrium line altitude
+        - threshold: float, maximum thinning rate (m/yr) below the ELA
+        - inplace: bool, whether to modify in place
+        """
+        # instantiate masked dbl diffs dictionary
+        oib_dbl_diffs_masked = {}
+        # check if dhda computed
+        if 'dhda' not in self._get_dbldiffs().keys():
+            self._get_dhda()
+        # get dbl diffs
+        dbl_diffs = self._get_dbldiffs()
+        # get elevation values
+        centers = self._get_centers()
+        # ablation area mask
+        abl_mask = centers < ela   # boolean mask
+        # identify columns (survey pairs) to mask
+        cols2mask = (dbl_diffs['dhda'][abl_mask] > threshold).any(axis=0)
+        # retain only non-masked survey pairs
+        oib_dbl_diffs_masked['dates'] = [dt for i, dt in enumerate(dbl_diffs['dates']) if not cols2mask[i]]
+        oib_dbl_diffs_masked['nyears'] = [y for i, y in enumerate(dbl_diffs['nyears']) if not cols2mask[i]]
+        oib_dbl_diffs_masked['dh'] = dbl_diffs['dh'][:, ~cols2mask]
+        oib_dbl_diffs_masked['dhda'] = dbl_diffs['dhda'][:, ~cols2mask]
+        oib_dbl_diffs_masked['sigma'] = dbl_diffs['sigma'][:, ~cols2mask]
+
+        # apply changes in-place or return results
+        if inplace:
+            self._set_dbldiffs(oib_dbl_diffs_masked)
+
+        else:
+            return oib_dbl_diffs_masked
+        
+    
     def _rebin(self, agg=100, inplace=False):
         """
         rebin to specified bin sizes.

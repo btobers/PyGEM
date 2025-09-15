@@ -705,6 +705,8 @@ def run(list_packed_vars):
                 # get ela from climate_historical (maximum year cannot be > 2019)
                 yrs = list(range(args.ref_startyear, min(args.ref_endyear, 2019) + 1))
                 ela = tasks.compute_ela(gdir, years=yrs)
+                # apply surge mask
+                icebridge._surge_mask(ela=ela, inplace=True)
                 # return icebridge.dbl_diffs and attach to gdir
                 gdir.oib_diffs = icebridge._get_dbldiffs()
                 # ensure data to calibrate against

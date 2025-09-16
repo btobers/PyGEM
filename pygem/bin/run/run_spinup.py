@@ -23,9 +23,6 @@ from oggm import cfg
 
 def run(glacno_list, **kwargs):
 
-    # need to determine startyr
-    
-
     main_glac_rgi = modelsetup.selectglaciersrgitable(glac_no=glacno_list)
     # model dates
     dt = modelsetup.datesmodelrun(startyear=1940, endyear=2019)

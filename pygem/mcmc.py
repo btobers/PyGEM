@@ -218,28 +218,47 @@ class mbPosterior:
     def log_likelihood(self, m):
         log_likehood = 0
         for i, pred in enumerate(self.preds):
-            if i==0:
-                log_likehood+=log_normal_density(self.obs[i][0], **{'mu': pred, 'sigma': self.obs[i][1]})
-            elif i==1:
-                # multiply obs by modeled density
+            if i == 0:
+                # --- Base case: mass balance likelihood ---
+                log_likehood += log_normal_density(
+                    self.obs[i][0],     # observed values
+                    mu=pred,            # predicted values
+                    sigma=self.obs[i][1]  # observation uncertainty
+                )
+            elif i == 1 and len(m) > 3:
+                # --- Extended case: apply density scaling to get binned mass change ---
+                # Create density field, separate values for ablation/accumulation zones
                 rho = np.ones_like(self.bin_z)
-                rho[self.abl_mask] = m[-2]
-                rho[~self.abl_mask] = m[-1]
-                rho=torch.tensor(rho)
-                log_likehood+=log_normal_density(self.obs[i][0]*rho[:,np.newaxis], **{'mu': pred, 'sigma': self.obs[i][1]*rho[:,np.newaxis]})
+                rho[self.abl_mask] = m[3]   # rhoabl
+                rho[~self.abl_mask] = m[4]  # rhoacc
+                rho = torch.tensor(rho)
+
+                log_likehood += log_normal_density(
+                    self.obs[i][0] * rho[:, np.newaxis],        # scaled observations
+                    mu=pred,                                    # scaled predictions
+                    sigma=self.obs[i][1] * rho[:, np.newaxis]   # scaled uncertainty
+                )
         return log_likehood
-    
-    # get log potential (sum up as any declared potential functions)
+
+    # compute the log-potential, summing over all declared potential functions.
     def log_potential(self, m):
-        log_potential = 0
-        for potential_function in self.potential_functions:
-            log_potential += potential_function(**{'kp':m[0],
-                                                    'tbias':m[1],
-                                                    'ddfsnow':m[2],
-                                                    'massbal':self.preds[0],
-                                                    'rhoabl':m[-2], 
-                                                    'rhoacc':m[-1]})
-        return log_potential
+        # --- Base arguments ---
+        # kp, tbias, ddfsnow, massbal
+        kwargs = {
+            'kp': m[0],
+            'tbias': m[1],
+            'ddfsnow': m[2],
+            'massbal': self.preds[0],
+        }
+
+        # --- Optional arguments(if len(m) > 3) ---
+        # rhoabl, rhoacc
+        if len(m) > 3:
+            kwargs['rhoabl'] = m[-2]
+            kwargs['rhoacc'] = m[-1]
+
+        # --- Evaluate all potential functions ---
+        return sum(pf(**kwargs) for pf in self.potential_functions)
 
     # get log posterior (sum of log prior, log likelihood and log potential)
     def log_posterior(self, m):

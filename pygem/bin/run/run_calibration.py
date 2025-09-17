@@ -706,7 +706,7 @@ def run(list_packed_vars):
                 yrs = list(range(args.ref_startyear, min(args.ref_endyear, 2019) + 1))
                 ela = tasks.compute_ela(gdir, years=yrs)
                 # apply surge mask
-                icebridge._surge_mask(ela=ela.values.min(), threshold=5, inplace=True)
+                icebridge._surge_mask(ela=ela.values.min(), threshold=1, inplace=True)
                 # return icebridge.dbl_diffs and attach to gdir
                 gdir.oib_diffs = icebridge._get_dbldiffs()
                 # ensure data to calibrate against
@@ -1399,6 +1399,8 @@ def run(list_packed_vars):
                 
                 def rho_constraints(**kwargs):
                     """Psuedo-likelihood function for ablation and accumulation area densities."""
+                    if 'rhoabl' not in kwargs or 'rhoacc' not in kwargs:
+                        return 0
                     rhoabl = float(kwargs['rhoabl'])
                     rhoacc = float(kwargs['rhoacc'])
                     if (rhoacc < 0) or (rhoabl < 0) or (rhoacc > rhoabl):
@@ -1452,9 +1454,10 @@ def run(list_packed_vars):
                             'tbias':    {'type':pygem_prms['calib']['MCMC_params']['tbias_disttype'], 'mu':float(tbias_mu) , 'sigma':float(tbias_sigma)},
                             'kp':       {'type':pygem_prms['calib']['MCMC_params']['kp_disttype'], 'alpha':float(kp_gamma_alpha), 'beta':float(kp_gamma_beta)},
                             'ddfsnow':  {'type':pygem_prms['calib']['MCMC_params']['ddfsnow_disttype'], 'mu':pygem_prms['calib']['MCMC_params']['ddfsnow_mu'], 'sigma':pygem_prms['calib']['MCMC_params']['ddfsnow_sigma'] ,'low':float(pygem_prms['calib']['MCMC_params']['ddfsnow_bndlow']), 'high':float(pygem_prms['calib']['MCMC_params']['ddfsnow_bndhigh'])},
-                            'rhoabl':   {'type':'normal', 'mu':900., 'sigma':17.},
-                            'rhoacc':   {'type':'normal', 'mu':600., 'sigma':60.},  # from Huss, 2013 Table 1
                             }
+                if args.oib:
+                            priors['rhoabl'] = {'type':'normal', 'mu':900., 'sigma':17.}
+                            priors['rhoacc'] = {'type':'normal', 'mu':600., 'sigma':60.}  # from Huss, 2013 Table 1
                 # define distributions from priors for sampling initials
                 prior_dists = get_priors(priors)
                 # ------------------
@@ -1503,8 +1506,7 @@ def run(list_packed_vars):
 
                 # instantiate mbPosterior given priors, and observed values
                 # note, mbEmulator.eval expects the modelprms to be ordered like so: [tbias, kp, ddfsnow], so priors and initial guesses must also be ordered as such)
-                priors = {key: priors[key] for key in ['tbias','kp','ddfsnow','rhoabl','rhoacc'] if key in priors}
-                # mb = mcmc.mbPosterior(obs, priors, mb_func=mbfxn, mb_args=mbargs, potential_fxns=[mb_max, must_melt], ela=min(gdir.ela['z']), bin_z=gdir.oib_diffs['bin_centers'])
+                priors = {key: priors[key] for key in ['tbias','kp','ddfsnow','rhoabl','rhoacc'] if key in priors}  # verify order of priors
                 mb = mcmc.mbPosterior(
                                         obs, 
                                         priors, 

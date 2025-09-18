@@ -18,6 +18,8 @@ import pygem.setup.config as config
 # Read the config
 pygem_prms = config.read_config()  # This reads the configuration file
 
+__all__ = ['oib']
+
 class oib:
     def __init__(self, rgi6id='', rgi7id='', oib_datpath=f"{pygem_prms['root']}/{pygem_prms['calib']['data']['oib']['oib_relpath']}", rgi7_rgi6_linksfn='RGI2000-v7.0-G-01_alaska-rgi6_links.csv'):
         self.oib_datpath = oib_datpath
@@ -34,7 +36,12 @@ class oib:
         self.bin_edges = None
         self.bin_centers = None
         self.bin_area = None
-    
+        # automatically map rgi6 and rgi7 ids if one is provided
+        if self.rgi6id and not self.rgi7id:
+            self._rgi6torgi7id()
+        elif self.rgi7id and not self.rgi6id:
+            self._rgi7torgi6id()
+
     def _get_diffs(self):
         return self.oib_diffs
     def _set_diffs(self, diffs_dict):
@@ -57,6 +64,8 @@ class oib:
         return self.bin_area
     def _get_name(self):
         return self.name
+    def _get_diff_inds_map(self):
+        return self.diff_inds_map
 
     def _rgi6torgi7id(self, debug=False):
         """
@@ -105,7 +114,17 @@ class oib:
         # load diffstats file
         with open(oib_fpath, 'rb') as f:
             self.oib_dict = json.load(f)
-            self.name = split_by_uppercase(self.oib_dict['glacier_shortname'])
+            self.name = _split_by_uppercase(self.oib_dict['glacier_shortname'])
+
+
+    def set_diff_inds_map(self, dates_table):
+        """
+        Store mapping of date pairs in deltah['dates'] to their indices in dates_table.
+        """
+        # create a dictionary mapping datetime values to their indices
+        index_map = {value: idx for idx, value in enumerate(dates_table.date.tolist())}
+        # map each date pair in deltah['dates'] to their indices
+        self.diff_inds_map = [(index_map[val1], index_map[val2]) for val1, val2 in self.dbl_diffs['dates']]
 
 
     def _parsediffs(self, debug=False):
@@ -126,7 +145,7 @@ class oib:
                 # uncertainty represented by IQR
                 sigmas = np.asarray(self.oib_dict[ssn][yr]['bin_vals']['bin_interquartile_range_diffs_vec'])
                 # add [diffs, sigma, counts] to master dictionary
-                diffs_dict[round_to_nearest_month(dt_obj)] = [diffs,sigmas,counts]
+                diffs_dict[_round_to_nearest_month(dt_obj)] = [diffs,sigmas,counts]
         # Sort the dictionary by date keys
         self._set_diffs(diffs_dict)
 
@@ -422,7 +441,23 @@ class oib:
             self._set_diffs(oib_diffs_filt)
         else:
             return oib_diffs_filt
-        
+
+
+def _split_by_uppercase(text):
+    """Add space before each uppercase letter (except at the start of the string."""
+    return re.sub(r"(?<!^)(?=[A-Z])", " ", text)
+
+
+def _round_to_nearest_month(dt):
+    """Round a datetime object to the nearest month."""
+    if dt.day >= 15:
+        # Round up to the first day of next month
+        next_month = dt.replace(day=1) + timedelta(days=32)
+        return next_month.replace(day=1)
+    else:
+        # Round down to the first day of the current month
+        return dt.replace(day=1)
+    
     ### not fully working yet ###
     # def _savgol_smoother(self, window=5, poly=2, inplace=False):
     #     """
@@ -457,19 +492,3 @@ class oib:
     #         self._set_diffs(oib_diffs_filt)
     #     else:
     #         return oib_diffs_filt
-
-
-def split_by_uppercase(text):
-    """Add space before each uppercase letter (except at the start of the string."""
-    return re.sub(r"(?<!^)(?=[A-Z])", " ", text)
-
-
-def round_to_nearest_month(dt):
-    """Round a datetime object to the nearest month."""
-    if dt.day >= 15:
-        # Round up to the first day of next month
-        next_month = dt.replace(day=1) + timedelta(days=32)
-        return next_month.replace(day=1)
-    else:
-        # Round down to the first day of the current month
-        return dt.replace(day=1)

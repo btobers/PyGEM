@@ -226,7 +226,7 @@ class oib:
         else:
             return dict(sorted(oib_diffs_masked.items()))
         
-    def _get_dhda(self):
+    def _get_dhdt(self):
         """
         compute thinning rate per year
         """
@@ -235,7 +235,7 @@ class oib:
         # mask any diffs where nyears < 1 (shouldn't ever be the case anyways, but just in case)
         self.dbl_diffs['nyears'][self.dbl_diffs['nyears'] < 1] = np.nan
         # get annual averages
-        self.dbl_diffs['dhda'] = self.dbl_diffs['dh'] / self.dbl_diffs['nyears'] 
+        self.dbl_diffs['dhdt'] = self.dbl_diffs['dh'] / self.dbl_diffs['nyears'] 
 
 
     def _surge_mask(self, ela=0, threshold=10, inplace=False):
@@ -250,9 +250,9 @@ class oib:
         """
         # instantiate masked dbl diffs dictionary
         oib_dbl_diffs_masked = {}
-        # check if dhda computed
-        if 'dhda' not in self._get_dbldiffs().keys():
-            self._get_dhda()
+        # check if dhdt computed
+        if 'dhdt' not in self._get_dbldiffs().keys():
+            self._get_dhdt()
         # get dbl diffs
         dbl_diffs = self._get_dbldiffs()
         # get elevation values
@@ -260,12 +260,12 @@ class oib:
         # ablation area mask
         abl_mask = centers < ela   # boolean mask
         # identify columns (survey pairs) to mask
-        cols2mask = (dbl_diffs['dhda'][abl_mask] > threshold).any(axis=0)
+        cols2mask = (dbl_diffs['dhdt'][abl_mask] > threshold).any(axis=0)
         # retain only non-masked survey pairs
         oib_dbl_diffs_masked['dates'] = [dt for i, dt in enumerate(dbl_diffs['dates']) if not cols2mask[i]]
         oib_dbl_diffs_masked['nyears'] = [y for i, y in enumerate(dbl_diffs['nyears']) if not cols2mask[i]]
         oib_dbl_diffs_masked['dh'] = dbl_diffs['dh'][:, ~cols2mask]
-        oib_dbl_diffs_masked['dhda'] = dbl_diffs['dhda'][:, ~cols2mask]
+        oib_dbl_diffs_masked['dhdt'] = dbl_diffs['dhdt'][:, ~cols2mask]
         oib_dbl_diffs_masked['sigma'] = dbl_diffs['sigma'][:, ~cols2mask]
 
         # apply changes in-place or return results

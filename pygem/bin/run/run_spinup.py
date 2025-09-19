@@ -1,9 +1,12 @@
-import sys, shutil, json
+import sys, shutil, json, warnings
 import argparse
 import multiprocessing
 import numpy as np
 import pandas as pd
 from functools import partial
+import xarray as xr
+from scipy import stats
+import matplotlib.pyplot as plt
 # pygem imports
 import pygem.setup.config as config
 # check for config
@@ -15,19 +18,131 @@ from pygem.massbalance import PyGEMMassBalance_wrapper
 #from pygem.glacierdynamics import MassRedistributionCurveModel
 from pygem.oggm_compat import single_flowline_glacier_directory, single_flowline_glacier_directory_with_calving, update_cfg
 import pygem.pygem_modelsetup as modelsetup
-from pygem.shop import debris
+from pygem.shop import debris, oib
+from pygem.utils._funcs import interp1d_fill_gaps
 from oggm import tasks, workflow
 from oggm.core import flowline
 from oggm import cfg
 
+# load dhdt data to compare model dhdt against
+def get_dhdt(dates_table, ela=0, rgi6id='', rgi7id=''):
+    try:
+        icebridge = oib.oib(rgi6id=rgi6id, rgi7id=rgi7id)
+        if icebridge.rgi7id is None:
+            raise ValueError(f"No RGI7id found for {icebridge.rgi6id}")
 
-def run(glacno_list, **kwargs):
+        icebridge._load()
+        icebridge._parsediffs()
+        icebridge._filter_on_pixel_count(
+            pctl=pygem_prms['calib']['data']['oib']['oib_filter_pctl'], 
+            inplace=True
+        )
+        icebridge._terminus_mask(inplace=True)
+        icebridge._remove_outliers_zscore(zscore=3, inplace=True)
+        icebridge._rebin(
+            agg=pygem_prms['calib']['data']['oib']['oib_rebin'], 
+            inplace=True
+        )
+
+        # retain only diffs within model timespan
+        _, oib_inds, _ = np.intersect1d(
+            list(icebridge.oib_diffs.keys()), 
+            dates_table.date.to_numpy(), 
+            return_indices=True
+        )
+        icebridge.oib_diffs = {
+            key: icebridge.oib_diffs[key] 
+            for i, key in enumerate(icebridge.oib_diffs) 
+            if i in oib_inds
+        }
+
+        if len(icebridge.oib_diffs) < 2:
+            raise ValueError("Must be at least two individual OIB surveys to difference.")
+
+        icebridge._dbl_diff()
+        icebridge._surge_mask(ela=ela, threshold=2, inplace=True)
+        icebridge.set_diff_inds_map(dates_table)
+
+        return icebridge
+
+    except Exception as e:
+        print(f"get_dhdt failed: {e}")
+        return None
+
+
+# get model monthly deltah
+def get_dhdt_hat(gdir, diff_inds_map, bin_edges, nyears):
+    # load flowline_diagnostics from spinup
+    f = gdir.get_filepath('fl_diagnostics', filesuffix='_dynamic_spinup_pygem_mb')
+    with xr.open_dataset(f, group='fl_0') as ds_spn:
+        ds_spn = ds_spn.load()
+
+    thickness_m = ds_spn.thickness_m.values.T # glacier thickness [m ice], (nbins, nyears)
+
+    # set any < 0 thickness to nan
+    thickness_m[thickness_m<=0] = np.nan
+
+    # climatic mass balance
+    dotb_monthly = np.repeat(ds_spn.climatic_mb_myr.values.T[:,1:] / 12, 12, axis=-1)
+
+    # convert to m ice
+    dotb_monthly = dotb_monthly * (pygem_prms['constants']['density_water'] / pygem_prms['constants']['density_ice'])
+    ### to get monthly thickness and mass we require monthly flux divergence ###
+    # we'll assume the flux divergence is constant througohut the year (is this a good assumption?)
+    # ie. take annual values and divide by 12 - use numpy repeat to repeat values across 12 months
+    flux_div_monthly_mmo = np.repeat(-ds_spn.flux_divergence_myr.values.T[:,1:] / 12, 12, axis=-1)
+    # get monthly binned change in thickness
+    delta_h_monthly = dotb_monthly - flux_div_monthly_mmo # [m ice per month]
+
+    # get binned monthly thickness = running thickness change + initial thickness
+    running_delta_h_monthly = np.cumsum(delta_h_monthly, axis=-1)
+    h_monthly =  running_delta_h_monthly + thickness_m[:,0][:,np.newaxis]
+
+    # get surface height at the specified reference year
+    ref_surface_h = ds_spn.bed_h.values + ds_spn.thickness_m.sel(time=pygem_prms['calib']['data']['oib']['oib_surface_reference_yr']).values
+
+    # aggregate model bin thicknesses as desired
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore')
+        h_monthly = np.column_stack([stats.binned_statistic(x=ref_surface_h, values=x, statistic=np.nanmean, bins=bin_edges)[0] for x in h_monthly.T])
+
+    # interpolate over any empty bins
+    h_monthly_ = np.column_stack([
+        interp1d_fill_gaps(x.copy()) for x in h_monthly.T
+    ])
+
+    # difference each set of inds in diff_inds_map
+    dh = np.column_stack([h_monthly_[:,tup[1]] - h_monthly_[:,tup[0]] for tup in diff_inds_map])
+    # divide by nyears
+    dhda = dh / np.array(nyears)
+    return dhda
+
+# run spinup function
+def run_spinup(gd, ye, **kwargs):
+    workflow.execute_entity_task(
+        tasks.run_dynamic_spinup,
+        gd,
+        minimise_for='area',
+        ye=ye,
+        output_filesuffix="_dynamic_spinup_pygem_mb",
+        store_fl_diagnostics=True,
+        store_model_geometry=True,
+        mb_model_historical=PyGEMMassBalance_wrapper(gd, fl_str="model_flowlines"),
+        ignore_errors=False,
+        **kwargs
+    )
+
+
+def run(glacno_list, optimize=False, debug=False, **kwargs):
+    # pull target_yr if provided
+    target_yr = kwargs.get("target_yr")
+    ye = target_yr if (target_yr is not None and not optimize) else 2022
 
     main_glac_rgi = modelsetup.selectglaciersrgitable(glac_no=glacno_list)
     # model dates
-    dt = modelsetup.datesmodelrun(startyear=1940, endyear=2019)
+    dt = modelsetup.datesmodelrun(startyear=1940, endyear=ye)     # broad bounds based on current elevation change data available and max spinup period
     # load climate data
-    ref_clim = class_climate.GCM(name="ERA5")
+    ref_clim = class_climate.GCM(name=pygem_prms['climate']['ref_gcm_name'])
 
     # Air temperature [degC]
     temp, _ = ref_clim.importGCMvarnearestneighbor_xarray(ref_clim.temp_fn, ref_clim.temp_vn, main_glac_rgi, dt)
@@ -42,7 +157,7 @@ def run(glacno_list, **kwargs):
     priors_df = pd.read_csv(pygem_prms["root"] + "/Output/calibration/" + pygem_prms["calib"]["priors_reg_fn"])
 
     # loop through gdirs and add `glacier_rgi_table`, `historical_climate`, `dates_table` and `modelprms` attributes to each glacier directory
-    for i, glaco in enumerate(glacno_list):
+    for i, glac_no in enumerate(glacno_list):
         try:
             glacier_rgi_table = main_glac_rgi.loc[main_glac_rgi.index.values[i], :]
             glacier_str = '{0:0.5f}'.format(glacier_rgi_table['RGIId_float'])
@@ -56,7 +171,6 @@ def run(glacno_list, **kwargs):
 
             # Select subsets of data
             gd.glacier_rgi_table = glacier_rgi_table
-            gd.glacier_rgi_table = main_glac_rgi.loc[main_glac_rgi.index.values[i], :]
             # Add climate data to glacier directory (first inversion data)
             gd.historical_climate = {"elev": elev[i],
                                     "temp": temp[i,:],
@@ -64,6 +178,10 @@ def run(glacno_list, **kwargs):
                                     "prec": prec[i,:],
                                     "lr": lr[i,:]}
             gd.dates_table = dt
+
+            # model ela
+            yrs = list(range(pygem_prms['climate']['ref_startyear'], min(pygem_prms['climate']['ref_endyear'], 2019) + 1))
+            ela = tasks.compute_ela(gd, years=yrs)
 
             # get model params from emulator calibration
             modelprms_fn = glacier_str + '-modelprms_dict.json'
@@ -96,23 +214,115 @@ def run(glacno_list, **kwargs):
             update_cfg({"continue_on_error" : True}, "PARAMS")
             update_cfg({"store_model_geometry" : True}, "PARAMS")
 
-            # perform OGGM dynamic spinup
-            workflow.execute_entity_task(tasks.run_dynamic_spinup,
-                                    gd,
-                                    # spinup_start_yr=spinup_start_yr,  # When to start the spinup
-                                    minimise_for='area',  # what target to match at the RGI date
-                                    # target_yr=target_yr, # The year at which we want to match area or volume. If None, gdir.rgi_date + 1 is used (the default)
-                                    # ye=,  # When the simulation should stop
-                                    output_filesuffix="_dynamic_spinup_pygem_mb",
-                                    store_fl_diagnostics=True,
-                                    store_model_geometry=True,
-                                    # first_guess_t_spinup = , could be passed as input argument for each step in the sampler based on prior tbias, current default first guess is -2
-                                    mb_model_historical = PyGEMMassBalance_wrapper(gd, fl_str="model_flowlines"),
-                                    ignore_errors=False,
-                                    **kwargs);
+            # get dhdt data
+            dhdt = get_dhdt(gd.dates_table, ela=ela.values.min(), rgi6id=gd.rgi_id.split('-')[1])
+            deltah_dict = dhdt._get_dbldiffs()
+
+            ### get bin index cutoff for lowest Nth percentile ###
+            valid_inds = np.where(dhdt._get_area() > 0)[0]
+            valid_elevs = dhdt._get_centers()[valid_inds]
+            thresh = np.percentile(valid_elevs, 30)
+
+            # highest index (in valid_inds) where elevation <= threshold
+            uppermost_bin = valid_inds[valid_elevs <= thresh].max()
+
+            if dhdt is not None:
+                results = {}
+
+                def objective(spinup_period):
+                    kwargs['spinup_period'] = spinup_period
+                    run_spinup(gd, ye, **kwargs)
+
+                    dhdt.set_diff_inds_map(
+                        modelsetup.datesmodelrun(
+                            startyear=gd.rgi_date + 1 - spinup_period, endyear=ye
+                        )
+                    )
+
+                    model = get_dhdt_hat(
+                        gd, dhdt._get_diff_inds_map(), dhdt._get_edges(), deltah_dict['nyears']
+                    )
+
+                    mismatch = np.nanmean(
+                        np.abs(model[:uppermost_bin, :] - deltah_dict['dhdt'][:uppermost_bin, :])
+                    )
+
+                    return mismatch, model
+
+                # evaluate candidates once
+                candidate_periods = np.arange(20,61,5)
+                for p in candidate_periods:
+                    mismatch, model = objective(p)
+                    results[p] = (mismatch, model)
+
+                # find best
+                best_period = min(results, key=lambda k: results[k][0])
+                best_value, best_model = results[best_period]
+
+                if debug:
+                    print("All results:", {k: v[0] for k, v in results.items()})
+                    print(f"Best spinup_period = {best_period}, mismatch = {best_value}")
+
+                    best_period = min(results, key=lambda k: results[k][0])
+                    best_value, best_model = results[best_period]
+
+                    worst_period = max(results, key=lambda k: results[k][0])
+                    worst_value, worst_model = results[worst_period]
+
+                    labels = [f'{t[0].year}{str(t[0].month).zfill(2)}-{t[1].year}{str(t[1].month).zfill(2)}' for t in deltah_dict['dates']]
+                    fig, ax = plt.subplots(figsize=(8, 5))
+
+                    for t in range(deltah_dict['dhdt'].shape[1]):
+                        # plot Obs first, grab the color
+                        line, = ax.plot(
+                            dhdt._get_centers(),
+                            deltah_dict['dhdt'][:, t],
+                            linestyle='-',
+                            marker='.',
+                            label=labels[t]
+                        )
+                        color = line.get_color()
+
+                        # plot Best model with same color
+                        ax.plot(
+                            dhdt._get_centers(),
+                            best_model[:, t],
+                            linestyle='--',
+                            marker='.',
+                            color=color,
+                        )
+
+                        # plot Worst model with same color
+                        ax.plot(
+                            dhdt._get_centers(),
+                            worst_model[:, t],
+                            linestyle=':',
+                            marker='.',
+                            color=color,
+                        )
+                    ax.axvline(dhdt._get_centers()[uppermost_bin], c='grey', ls=':')
+                    ax.axhline(0, c='grey', ls='-')
+                    ax.plot([],[],'k--',label=r'$\hat{best}$')
+                    ax.plot([],[],'k:', label=r'$\hat{worst}$')
+                    ax.set_xlabel("elevation (m)")
+                    ax.set_ylabel(r"elevation change (m yr$^{-1}$)")
+                    ax.set_title(
+                        f"{glac_no}\nBest={best_period} (mismatch={best_value:.3f}), "
+                        f"Worst={worst_period} (mismatch={worst_value:.3f})"
+                    )
+                    ax.legend(handlelength=1, borderaxespad=0, fancybox=False)
+                    # plt.show()
+                    fig.savefig(f'/Users/btober/Drive/work/gem/pres/figs/spinup_opt/{glac_no}.png',dpi=300)
+                    plt.close()
+            else:
+                best_period = None    # just use OGGM default
+
+            # rerun spinup explicitly for the best candidate - or default if not minimizing against dhdt obs
+            kwargs['spinup_period'] = best_period
+            run_spinup(gd, ye, **kwargs)
 
         except Exception as e:
-            print(f"Error processing glacier {glaco}: {e}")
+            print(f"Error processing glacier {glac_no}: {e}")
             # continue to next glacier
             continue
 
@@ -129,12 +339,23 @@ def main():
                         help='Randoph Glacier Inventory glacier number (can take multiple)')
     parser.add_argument('-rgi_glac_number_fn', action='store', type=str, default=None,
                         help='filepath containing list of rgi_glac_number, helpful for running batches on spc'),
-    parser.add_argument('-spinup_start_yr', type=int, default=None)
-    parser.add_argument('-spinup_period', type=int, default=20)
     parser.add_argument('-target_yr', type=int, default=None)
-    parser.add_argument('-ye', type=int, default=None)
     parser.add_argument('-ncores', action='store', type=int, default=1,
                         help='number of simultaneous processes (cores) to use')
+    parser.add_argument('-v', '--debug', action='store_true',
+                        help='Flag for debugging')
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        '-spinup_period',
+        type=int,
+        default=None,
+        help="Fixed spinup period (years). If not provided, OGGM default is used."
+    )
+    group.add_argument(
+        '-optimize',
+        action='store_true',
+        help="Optimize the spinup_period by minimizing against elevation change data."
+    )
     args = parser.parse_args()
     
     # RGI glacier number
@@ -167,7 +388,7 @@ def main():
     glac_no_lsts = modelsetup.split_list(glac_no, n=ncores)
 
     # set up partial function with debug argument
-    run_partial = partial(run, spinup_start_yr=args.spinup_start_yr, spinup_period=args.spinup_period, target_yr=args.target_yr, ye=args.ye)
+    run_partial = partial(run, optimize=args.optimize, debug=args.debug, target_yr=args.target_yr, spinup_period=args.spinup_period)
     # parallel processing
     print(f'Processing with {ncores} cores... \n{glac_no_lsts}')
     with multiprocessing.Pool(ncores) as p:

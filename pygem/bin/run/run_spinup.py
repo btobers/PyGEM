@@ -117,9 +117,25 @@ def get_dhdt_hat(gdir, diff_inds_map, bin_edges, nyears):
     dhda = dh / np.array(nyears)
     return dhda
 
+def loss_with_penalty(x, obs, mod, threshold=100, weight=1.0):
+    # MAE where observations exist
+    mismatch = np.nanmean(np.abs(mod - obs))
+
+    # Penalty: positive modeled values below threshold
+    mask = x < threshold
+    mod_sub = mod[mask]
+
+    # keep only positives
+    positives = np.clip(mod_sub, a_min=0, a_max=None)
+
+    # add to loss (scales with mean positive magnitude)
+    penalty = weight * np.nanmean(positives)
+
+    return mismatch + penalty
+
 # run spinup function
 def run_spinup(gd, ye, **kwargs):
-    workflow.execute_entity_task(
+    out = workflow.execute_entity_task(
         tasks.run_dynamic_spinup,
         gd,
         minimise_for='area',
@@ -131,9 +147,10 @@ def run_spinup(gd, ye, **kwargs):
         ignore_errors=False,
         **kwargs
     )
+    return out
 
 
-def run(glacno_list, optimize=False, debug=False, **kwargs):
+def run(glacno_list, optimize=False, outdir=None, debug=False, ncores=1, **kwargs):
     # pull target_yr if provided
     target_yr = kwargs.get("target_yr")
     ye = target_yr if (target_yr is not None and not optimize) else 2022
@@ -168,6 +185,8 @@ def run(glacno_list, optimize=False, debug=False, **kwargs):
             else:
                 gd = single_flowline_glacier_directory_with_calving(glacier_str, reset=False)
                 gd.is_tidewater = True
+            if debug:
+                print(f"Running {glac_no}{' (tidewater)' if gd.is_tidewater else ''}")
 
             # Select subsets of data
             gd.glacier_rgi_table = glacier_rgi_table
@@ -222,6 +241,7 @@ def run(glacno_list, optimize=False, debug=False, **kwargs):
             valid_inds = np.where(dhdt._get_area() > 0)[0]
             valid_elevs = dhdt._get_centers()[valid_inds]
             thresh = np.percentile(valid_elevs, 30)
+            thresh = min([thresh, ela.values.min()])
 
             # highest index (in valid_inds) where elevation <= threshold
             uppermost_bin = valid_inds[valid_elevs <= thresh].max()
@@ -231,11 +251,14 @@ def run(glacno_list, optimize=False, debug=False, **kwargs):
 
                 def objective(spinup_period):
                     kwargs['spinup_period'] = spinup_period
-                    run_spinup(gd, ye, **kwargs)
+                    fls = run_spinup(gd, ye, **kwargs)
+
+                    # get true spinup period (if initial fails, oggm tries period/2)
+                    spinup_period_ = gd.rgi_date+1 - fls[0].y0
 
                     dhdt.set_diff_inds_map(
                         modelsetup.datesmodelrun(
-                            startyear=gd.rgi_date + 1 - spinup_period, endyear=ye
+                            startyear=fls[0].y0, endyear=ye
                         )
                     )
 
@@ -243,17 +266,18 @@ def run(glacno_list, optimize=False, debug=False, **kwargs):
                         gd, dhdt._get_diff_inds_map(), dhdt._get_edges(), deltah_dict['nyears']
                     )
 
-                    mismatch = np.nanmean(
-                        np.abs(model[:uppermost_bin, :] - deltah_dict['dhdt'][:uppermost_bin, :])
-                    )
-
-                    return mismatch, model
+                    # penalize positive values below specified elevation threshold
+                    loss = loss_with_penalty(dhdt._get_centers(), deltah_dict['dhdt'], model, thresh)
+                    # l = np.nanmean(
+                    #     np.abs(model[:uppermost_bin, :] - deltah_dict['dhdt'][:uppermost_bin, :])
+                    # )
+                    return spinup_period_, loss, model
 
                 # evaluate candidates once
                 candidate_periods = np.arange(20,61,5)
                 for p in candidate_periods:
-                    mismatch, model = objective(p)
-                    results[p] = (mismatch, model)
+                    p_, mismatch, model = objective(p)
+                    results[p_] = (mismatch, model)
 
                 # find best
                 best_period = min(results, key=lambda k: results[k][0])
@@ -311,8 +335,21 @@ def run(glacno_list, optimize=False, debug=False, **kwargs):
                         f"Worst={worst_period} (mismatch={worst_value:.3f})"
                     )
                     ax.legend(handlelength=1, borderaxespad=0, fancybox=False)
-                    # plt.show()
-                    fig.savefig(f'/Users/btober/Drive/work/gem/pres/figs/spinup_opt/{glac_no}.png',dpi=300)
+                    # plot area
+                    area = dhdt._get_area()
+                    area_mask = area>0
+                    ax2 = ax.twinx()  # shares x-axis
+                    ax2.fill_between(dhdt._get_centers()[area_mask], 0, area[area_mask], color='gray', alpha=0.1)
+                    ax2.set_ylim([0,ax2.get_ylim()[1]])
+                    ax2.set_ylabel(r"area (m $^{2}$)", color='gray')
+                    ax2.tick_params(axis='y', colors='gray')
+                    ax2.spines['right'].set_color('gray')
+                    ax2.yaxis.label.set_color('gray')
+                    fig.tight_layout()
+                    if ncores==1:
+                        plt.show()
+                    if outdir:
+                        fig.savefig(f'{outdir}/{glac_no}-spinup_optimization.png',dpi=300)
                     plt.close()
             else:
                 best_period = None    # just use OGGM default
@@ -342,6 +379,7 @@ def main():
     parser.add_argument('-target_yr', type=int, default=None)
     parser.add_argument('-ncores', action='store', type=int, default=1,
                         help='number of simultaneous processes (cores) to use')
+    parser.add_argument('-outdir', type=str, default=None, help='directory to store any ouputs (diagnostic figures, etc.)')
     parser.add_argument('-v', '--debug', action='store_true',
                         help='Flag for debugging')
     group = parser.add_mutually_exclusive_group()
@@ -388,7 +426,7 @@ def main():
     glac_no_lsts = modelsetup.split_list(glac_no, n=ncores)
 
     # set up partial function with debug argument
-    run_partial = partial(run, optimize=args.optimize, debug=args.debug, target_yr=args.target_yr, spinup_period=args.spinup_period)
+    run_partial = partial(run, optimize=args.optimize, outdir=args.outdir, debug=args.debug, ncores=ncores, target_yr=args.target_yr, spinup_period=args.spinup_period)
     # parallel processing
     print(f'Processing with {ncores} cores... \n{glac_no_lsts}')
     with multiprocessing.Pool(ncores) as p:

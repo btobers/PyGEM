@@ -1023,7 +1023,12 @@ class PyGEMMassBalance_wrapper(MassBalanceModel):
         self.glacier_rgi_table = self.gdir.glacier_rgi_table
         self.fls = self.gdir.read_pickle(fl_str, filesuffix=filesuffix)
         self.hemisphere=gdir.hemisphere
-
+        # # instantiate mass balance model
+        # self.mbmod = mb_model_class(gdir=self.gdir, 
+        #                             modelprms=self.modelprms, 
+        #                             glacier_rgi_table=self.glacier_rgi_table, 
+        #                             fls=self.fls, 
+        #                             **kwargs )
     @property
     def mbmod(self):
         return self.mb_model_class(gdir=self.gdir,

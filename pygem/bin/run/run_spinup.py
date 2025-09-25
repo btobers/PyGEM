@@ -238,129 +238,131 @@ def run(glacno_list, optimize=False, outdir=None, debug=False, ncores=1, **kwarg
             update_cfg({"continue_on_error" : True}, "PARAMS")
             update_cfg({"store_model_geometry" : True}, "PARAMS")
 
-            # get dhdt data
-            dhdt = get_dhdt(gd.dates_table, ela=ela.values.min(), rgi6id=gd.rgi_id.split('-')[1])
-            deltah_dict = dhdt._get_dbldiffs()
+            # optimize against binned dhdt data
+            spinup_period = None
+            if optimize:
+                # get dhdt data
+                dhdt = get_dhdt(gd.dates_table, ela=ela.values.min(), rgi6id=gd.rgi_id.split('-')[1])
 
-            ### get bin index cutoff for lowest Nth percentile ###
-            valid_inds = np.where(dhdt._get_area() > 0)[0]
-            valid_elevs = dhdt._get_centers()[valid_inds]
-            thresh = np.percentile(valid_elevs, 30)
-            thresh = min([thresh, ela.values.min()])
+                if dhdt is not None:
+                    results = {}
+                    # get dh data dictionary
+                    deltah_dict = dhdt._get_dbldiffs()
 
-            # highest index (in valid_inds) where elevation <= threshold
-            uppermost_bin = valid_inds[valid_elevs <= thresh].max()
+                    ### get bin index cutoff for lowest Nth percentile ###
+                    valid_inds = np.where(dhdt._get_area() > 0)[0]
+                    valid_elevs = dhdt._get_centers()[valid_inds]
+                    thresh = np.percentile(valid_elevs, 30)
+                    thresh = min([thresh, ela.values.min()])
+                    # highest index (in valid_inds) where elevation <= threshold
+                    uppermost_bin = valid_inds[valid_elevs <= thresh].max()
 
-            if dhdt is not None:
-                results = {}
+                    def _objective(spinup_period):
+                        kwargs['spinup_period'] = spinup_period
+                        fls = run_spinup(gd, ye, **kwargs)
 
-                def objective(spinup_period):
-                    kwargs['spinup_period'] = spinup_period
-                    fls = run_spinup(gd, ye, **kwargs)
+                        # get true spinup period (if initial fails, oggm tries period/2)
+                        spinup_period_ = gd.rgi_date+1 - fls[0].y0
 
-                    # get true spinup period (if initial fails, oggm tries period/2)
-                    spinup_period_ = gd.rgi_date+1 - fls[0].y0
-
-                    dhdt.set_diff_inds_map(
-                        modelsetup.datesmodelrun(
-                            startyear=fls[0].y0, endyear=ye
+                        dhdt.set_diff_inds_map(
+                            modelsetup.datesmodelrun(
+                                startyear=fls[0].y0, endyear=ye
+                            )
                         )
-                    )
 
-                    model = get_dhdt_hat(
-                        gd, dhdt._get_diff_inds_map(), dhdt._get_edges(), deltah_dict['nyears']
-                    )
+                        model = get_dhdt_hat(
+                            gd, dhdt._get_diff_inds_map(), dhdt._get_edges(), deltah_dict['nyears']
+                        )
 
-                    # penalize positive values below specified elevation threshold
-                    loss = loss_with_penalty(dhdt._get_centers(), deltah_dict['dhdt'], model, thresh)
-                    # l = np.nanmean(
-                    #     np.abs(model[:uppermost_bin, :] - deltah_dict['dhdt'][:uppermost_bin, :])
-                    # )
-                    return spinup_period_, loss, model
+                        # penalize positive values below specified elevation threshold
+                        loss = loss_with_penalty(dhdt._get_centers(), deltah_dict['dhdt'], model, thresh)
+                        # l = np.nanmean(
+                        #     np.abs(model[:uppermost_bin, :] - deltah_dict['dhdt'][:uppermost_bin, :])
+                        # )
+                        return spinup_period_, loss, model
 
-                # evaluate candidates once
-                candidate_periods = np.arange(20,61,5)
-                for p in candidate_periods:
-                    p_, mismatch, model = objective(p)
-                    results[p_] = (mismatch, model)
+                    # evaluate candidates once
+                    candidate_periods = np.arange(20,61,5)
+                    for p in candidate_periods:
+                        p_, mismatch, model = _objective(p)
+                        results[p_] = (mismatch, model)
 
-                # find best
-                best_period = min(results, key=lambda k: results[k][0])
-                best_value, best_model = results[best_period]
-
-                if debug:
-                    print("All results:", {k: v[0] for k, v in results.items()})
-                    print(f"Best spinup_period = {best_period}, mismatch = {best_value}")
-
+                    # find best
                     best_period = min(results, key=lambda k: results[k][0])
                     best_value, best_model = results[best_period]
+                    # update kwarg
+                    kwargs['spinup_period'] = best_period
 
-                    worst_period = max(results, key=lambda k: results[k][0])
-                    worst_value, worst_model = results[worst_period]
+                    if debug:
+                        print("All results:", {k: v[0] for k, v in results.items()})
+                        print(f"Best spinup_period = {best_period}, mismatch = {best_value}")
 
-                    labels = [f'{t[0].year}{str(t[0].month).zfill(2)}-{t[1].year}{str(t[1].month).zfill(2)}' for t in deltah_dict['dates']]
-                    fig, ax = plt.subplots(figsize=(8, 5))
+                        # find worst
+                        worst_period = max(results, key=lambda k: results[k][0])
+                        worst_value, worst_model = results[worst_period]
 
-                    for t in range(deltah_dict['dhdt'].shape[1]):
-                        # plot Obs first, grab the color
-                        line, = ax.plot(
-                            dhdt._get_centers(),
-                            deltah_dict['dhdt'][:, t],
-                            linestyle='-',
-                            marker='.',
-                            label=labels[t]
+                        labels = [f'{t[0].year}{str(t[0].month).zfill(2)}-{t[1].year}{str(t[1].month).zfill(2)}' for t in deltah_dict['dates']]
+                        fig, ax = plt.subplots(figsize=(8, 5))
+
+                        for t in range(deltah_dict['dhdt'].shape[1]):
+                            # plot Obs first, grab the color
+                            line, = ax.plot(
+                                dhdt._get_centers(),
+                                deltah_dict['dhdt'][:, t],
+                                linestyle='-',
+                                marker='.',
+                                label=labels[t]
+                            )
+                            color = line.get_color()
+
+                            # plot Best model with same color
+                            ax.plot(
+                                dhdt._get_centers(),
+                                best_model[:, t],
+                                linestyle='--',
+                                marker='.',
+                                color=color,
+                            )
+
+                            # plot Worst model with same color
+                            ax.plot(
+                                dhdt._get_centers(),
+                                worst_model[:, t],
+                                linestyle=':',
+                                marker='.',
+                                color=color,
+                            )
+                        ax.axvline(dhdt._get_centers()[uppermost_bin], c='grey', ls=':')
+                        ax.axhline(0, c='grey', ls='-')
+                        ax.plot([],[],'k--',label=r'$\hat{best}$')
+                        ax.plot([],[],'k:', label=r'$\hat{worst}$')
+                        ax.set_xlabel("elevation (m)")
+                        ax.set_ylabel(r"elevation change (m yr$^{-1}$)")
+                        ax.set_title(
+                            f"{glac_no}\nBest={best_period} (mismatch={best_value:.3f}), "
+                            f"Worst={worst_period} (mismatch={worst_value:.3f})"
                         )
-                        color = line.get_color()
+                        ax.legend(handlelength=1, borderaxespad=0, fancybox=False)
+                        # plot area
+                        area = dhdt._get_area()
+                        area_mask = area>0
+                        ax2 = ax.twinx()  # shares x-axis
+                        ax2.fill_between(dhdt._get_centers()[area_mask], 0, area[area_mask], color='gray', alpha=0.1)
+                        ax2.set_ylim([0,ax2.get_ylim()[1]])
+                        ax2.set_ylabel(r"area (m $^{2}$)", color='gray')
+                        ax2.tick_params(axis='y', colors='gray')
+                        ax2.spines['right'].set_color('gray')
+                        ax2.yaxis.label.set_color('gray')
+                        fig.tight_layout()
+                        if ncores==1:
+                            plt.show()
+                        if outdir:
+                            fig.savefig(f'{outdir}/{glac_no}-spinup_optimization.png',dpi=300)
+                        plt.close()
 
-                        # plot Best model with same color
-                        ax.plot(
-                            dhdt._get_centers(),
-                            best_model[:, t],
-                            linestyle='--',
-                            marker='.',
-                            color=color,
-                        )
-
-                        # plot Worst model with same color
-                        ax.plot(
-                            dhdt._get_centers(),
-                            worst_model[:, t],
-                            linestyle=':',
-                            marker='.',
-                            color=color,
-                        )
-                    ax.axvline(dhdt._get_centers()[uppermost_bin], c='grey', ls=':')
-                    ax.axhline(0, c='grey', ls='-')
-                    ax.plot([],[],'k--',label=r'$\hat{best}$')
-                    ax.plot([],[],'k:', label=r'$\hat{worst}$')
-                    ax.set_xlabel("elevation (m)")
-                    ax.set_ylabel(r"elevation change (m yr$^{-1}$)")
-                    ax.set_title(
-                        f"{glac_no}\nBest={best_period} (mismatch={best_value:.3f}), "
-                        f"Worst={worst_period} (mismatch={worst_value:.3f})"
-                    )
-                    ax.legend(handlelength=1, borderaxespad=0, fancybox=False)
-                    # plot area
-                    area = dhdt._get_area()
-                    area_mask = area>0
-                    ax2 = ax.twinx()  # shares x-axis
-                    ax2.fill_between(dhdt._get_centers()[area_mask], 0, area[area_mask], color='gray', alpha=0.1)
-                    ax2.set_ylim([0,ax2.get_ylim()[1]])
-                    ax2.set_ylabel(r"area (m $^{2}$)", color='gray')
-                    ax2.tick_params(axis='y', colors='gray')
-                    ax2.spines['right'].set_color('gray')
-                    ax2.yaxis.label.set_color('gray')
-                    fig.tight_layout()
-                    if ncores==1:
-                        plt.show()
-                    if outdir:
-                        fig.savefig(f'{outdir}/{glac_no}-spinup_optimization.png',dpi=300)
-                    plt.close()
-            else:
-                best_period = None    # just use OGGM default
-
-            # rerun spinup explicitly for the best candidate - or default if not minimizing against dhdt obs
-            kwargs['spinup_period'] = best_period
+            # update spinup_period if optimized or specified as CLI argument, else remove kwarg and use OGGM default
+            if kwargs.get("spinup_period") is None:
+                kwargs.pop("spinup_period", None)
             run_spinup(gd, ye, **kwargs)
 
         except Exception as e:

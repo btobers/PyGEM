@@ -282,7 +282,7 @@ def run(glacno_list, optimize=False, outdir=None, debug=False, ncores=1, **kwarg
                         return spinup_period_, loss, model
 
                     # evaluate candidates once
-                    candidate_periods = np.arange(20,61,5)
+                    candidate_periods = np.arange(20,61,10)
                     for p in candidate_periods:
                         p_, mismatch, model = _objective(p)
                         results[p_] = (mismatch, model)

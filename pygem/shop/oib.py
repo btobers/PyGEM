@@ -123,9 +123,13 @@ class oib:
         """
         # create a dictionary mapping datetime values to their indices
         index_map = {value: idx for idx, value in enumerate(dates_table.date.tolist())}
-        # map each date pair in deltah['dates'] to their indices
-        self.diff_inds_map = [(index_map[val1], index_map[val2]) for val1, val2 in self.dbl_diffs['dates']]
-
+        # map each date pair in deltah['dates'] to their indices, if not found store (None,None)
+        self.diff_inds_map = [
+            (index_map.get(val1), index_map.get(val2))
+            if val1 in index_map and val2 in index_map
+            else (None, None)
+            for val1, val2 in self.dbl_diffs['dates']
+        ]
 
     def _parsediffs(self, debug=False):
         """

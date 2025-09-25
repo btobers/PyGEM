@@ -112,7 +112,12 @@ def get_dhdt_hat(gdir, diff_inds_map, bin_edges, nyears):
     ])
 
     # difference each set of inds in diff_inds_map
-    dh = np.column_stack([h_monthly_[:,tup[1]] - h_monthly_[:,tup[0]] for tup in diff_inds_map])
+    dh = np.column_stack([
+        h_monthly_[:, j] - h_monthly_[:, i] if i is not None and j is not None
+        else np.full(h_monthly_.shape[0], np.nan)
+        for i, j in diff_inds_map
+    ])
+
     # divide by nyears
     dhda = dh / np.array(nyears)
     return dhda
